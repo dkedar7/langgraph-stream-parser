@@ -87,8 +87,10 @@ class JupyterDisplay:
         self._show_tool_args = show_tool_args
         self._max_content_preview = max_content_preview
 
-        # State tracking
-        self._content_buffer: str = ""
+        # State tracking - messages as list of (role, content) tuples
+        self._messages: list[tuple[str, str]] = []
+        self._current_role: str | None = None
+        self._current_content: str = ""
         self._tools: dict[str, ToolState] = {}
         self._extractions: list[ToolExtractedEvent] = []
         self._interrupt: InterruptEvent | None = None
@@ -129,7 +131,9 @@ class JupyterDisplay:
 
     def reset(self) -> None:
         """Reset display state for a new stream."""
-        self._content_buffer = ""
+        self._messages.clear()
+        self._current_role = None
+        self._current_content = ""
         self._tools.clear()
         self._extractions.clear()
         self._interrupt = None
@@ -172,13 +176,25 @@ class JupyterDisplay:
         self._process_event(event)
         self._render()
 
+    def _flush_current_message(self) -> None:
+        """Flush current message buffer to messages list."""
+        if self._current_content and self._current_role:
+            self._messages.append((self._current_role, self._current_content))
+            self._current_content = ""
+
     def _process_event(self, event: StreamEvent) -> None:
         """Process an event and update internal state."""
         match event:
-            case ContentEvent(content=text):
-                self._content_buffer += text
+            case ContentEvent(content=text, role=role):
+                # If role changes, flush the previous message
+                if self._current_role is not None and self._current_role != role:
+                    self._flush_current_message()
+                self._current_role = role
+                self._current_content += text
 
             case ToolCallStartEvent(id=tool_id, name=name, args=args):
+                # Flush any pending content before tool
+                self._flush_current_message()
                 self._tools[tool_id] = ToolState(
                     id=tool_id,
                     name=name,
@@ -219,28 +235,40 @@ class JupyterDisplay:
 
     def _render(self) -> None:
         """Render the current state to the notebook."""
-        from IPython.display import display, clear_output
+        from IPython.display import clear_output
         from rich.console import Console
         from rich.panel import Panel
         from rich.table import Table
         from rich.text import Text
-        from rich.markdown import Markdown
         from rich import box
-        import io
 
-        # Capture rich output to string
-        string_io = io.StringIO()
-        console = Console(file=string_io, force_terminal=True, width=100)
+        # Clear previous output
+        clear_output(wait=True)
 
-        # Render content panel if we have content
-        if self._content_buffer:
-            content_text = Text(self._content_buffer)
-            console.print(Panel(
-                content_text,
-                title="[bold blue]Assistant[/bold blue]",
-                border_style="blue",
-                box=box.ROUNDED,
-            ))
+        # Check if there's anything to render
+        has_content = (
+            self._messages or
+            self._current_content or
+            self._tools or
+            self._extractions or
+            self._interrupt or
+            self._error or
+            self._complete
+        )
+
+        if not has_content:
+            return
+
+        # Create a console that outputs directly to Jupyter
+        console = Console(force_jupyter=True, width=100)
+
+        # Render completed messages
+        for role, content in self._messages:
+            self._render_message_panel(console, role, content)
+
+        # Render current in-progress message
+        if self._current_content:
+            self._render_message_panel(console, self._current_role or "assistant", self._current_content)
 
         # Render tools table if we have tools
         if self._tools:
@@ -296,13 +324,26 @@ class JupyterDisplay:
         if self._complete and not self._error:
             console.print(Text("Stream completed", style="dim green"))
 
-        # Clear and display
-        clear_output(wait=True)
-        output = string_io.getvalue()
-        if output.strip():
-            display_html = self._ansi_to_html(output)
-            from IPython.display import HTML
-            display(HTML(f"<pre style='font-family: monospace; white-space: pre-wrap;'>{display_html}</pre>"))
+    def _render_message_panel(self, console: Any, role: str, content: str) -> None:
+        """Render a message panel for the given role."""
+        from rich.panel import Panel
+        from rich.text import Text
+        from rich import box
+
+        if role == "human":
+            console.print(Panel(
+                Text(content),
+                title="[bold green]Human[/bold green]",
+                border_style="green",
+                box=box.ROUNDED,
+            ))
+        else:
+            console.print(Panel(
+                Text(content),
+                title="[bold blue]Assistant[/bold blue]",
+                border_style="blue",
+                box=box.ROUNDED,
+            ))
 
     def _render_extraction(self, console: Any, event: ToolExtractedEvent) -> None:
         """Render a tool extraction event."""
@@ -433,20 +474,3 @@ class JupyterDisplay:
         if len(result) > 40:
             result = result[:37] + "..."
         return result
-
-    def _ansi_to_html(self, text: str) -> str:
-        """Convert ANSI escape codes to HTML for display."""
-        try:
-            from rich.console import Console
-            from rich.text import Text
-            import io
-
-            # Use rich to convert ANSI to HTML
-            console = Console(file=io.StringIO(), force_terminal=True, record=True)
-            console.print(Text.from_ansi(text))
-            return console.export_html(inline_styles=True, code_format="<span {0}>{1}</span>")
-        except Exception:
-            # Fallback: strip ANSI codes
-            import re
-            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-            return ansi_escape.sub('', text)

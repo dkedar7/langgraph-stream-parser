@@ -104,13 +104,26 @@ class TestJupyterDisplayEventProcessing:
         self.display = JupyterDisplay()
 
     def test_process_content_event(self):
-        event = ContentEvent(content="Hello ")
+        event = ContentEvent(content="Hello ", role="assistant")
         self.display._process_event(event)
-        assert self.display._content_buffer == "Hello "
+        assert self.display._current_content == "Hello "
+        assert self.display._current_role == "assistant"
 
-        event2 = ContentEvent(content="World")
+        event2 = ContentEvent(content="World", role="assistant")
         self.display._process_event(event2)
-        assert self.display._content_buffer == "Hello World"
+        assert self.display._current_content == "Hello World"
+
+    def test_process_content_event_role_change(self):
+        # Assistant message
+        self.display._process_event(ContentEvent(content="Hi!", role="assistant"))
+        assert self.display._current_content == "Hi!"
+
+        # Human message - should flush previous
+        self.display._process_event(ContentEvent(content="Hello", role="human"))
+        assert len(self.display._messages) == 1
+        assert self.display._messages[0] == ("assistant", "Hi!")
+        assert self.display._current_content == "Hello"
+        assert self.display._current_role == "human"
 
     def test_process_tool_start_event(self):
         event = ToolCallStartEvent(
@@ -204,7 +217,9 @@ class TestJupyterDisplayReset:
         display = JupyterDisplay()
 
         # Populate some state
-        display._content_buffer = "Some content"
+        display._messages.append(("assistant", "Some content"))
+        display._current_content = "In progress"
+        display._current_role = "assistant"
         display._tools["call_1"] = ToolState(id="1", name="test", args={})
         display._extractions.append(
             ToolExtractedEvent(tool_name="t", extracted_type="x", data="y")
@@ -216,7 +231,9 @@ class TestJupyterDisplayReset:
         # Reset
         display.reset()
 
-        assert display._content_buffer == ""
+        assert len(display._messages) == 0
+        assert display._current_content == ""
+        assert display._current_role is None
         assert len(display._tools) == 0
         assert len(display._extractions) == 0
         assert display._interrupt is None
@@ -276,18 +293,3 @@ class TestJupyterDisplayRendering:
         self.display.stream(mock_stream, parser=mock_parser)
 
         assert mock_render.call_count == 2  # Once for each event
-
-
-class TestAnsiToHtml:
-    def test_strips_ansi_on_fallback(self):
-        display = JupyterDisplay()
-        # Test with ANSI escape codes
-        text_with_ansi = "\x1b[31mRed text\x1b[0m"
-
-        # Mock rich to fail
-        with patch.object(display, '_ansi_to_html') as mock_convert:
-            # Call the actual implementation without mocking
-            import re
-            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-            result = ansi_escape.sub('', text_with_ansi)
-            assert result == "Red text"

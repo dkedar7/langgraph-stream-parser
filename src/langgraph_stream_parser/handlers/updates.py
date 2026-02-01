@@ -128,18 +128,20 @@ class UpdatesHandler:
         if not messages:
             return
 
-        # Get the last message (updates typically contain one message)
-        if isinstance(messages, list):
-            last_message = messages[-1]
-        else:
-            last_message = messages
+        # Normalize to list
+        if not isinstance(messages, list):
+            messages = [messages]
 
-        message_type = get_message_type_name(last_message)
+        # Process each message in sequence
+        for message in messages:
+            message_type = get_message_type_name(message)
 
-        if message_type == "ToolMessage":
-            yield from self._process_tool_message(last_message)
-        elif message_type in ("AIMessage", "AIMessageChunk"):
-            yield from self._process_ai_message(node_name, last_message)
+            if message_type == "ToolMessage":
+                yield from self._process_tool_message(message)
+            elif message_type in ("AIMessage", "AIMessageChunk"):
+                yield from self._process_ai_message(node_name, message)
+            elif message_type == "HumanMessage":
+                yield from self._process_human_message(node_name, message)
 
     def _process_ai_message(
         self, node_name: str, message: Any
@@ -184,6 +186,29 @@ class UpdatesHandler:
         if content:
             yield ContentEvent(
                 content=content,
+                role="assistant",
+                node=node_name,
+            )
+
+    def _process_human_message(
+        self, node_name: str, message: Any
+    ) -> Iterator[StreamEvent]:
+        """Process a Human message.
+
+        Args:
+            node_name: The name of the node.
+            message: The HumanMessage.
+
+        Yields:
+            ContentEvent with role="human".
+        """
+        content = extract_message_content(message)
+        content = content.strip() if content else ""
+
+        if content:
+            yield ContentEvent(
+                content=content,
+                role="human",
                 node=node_name,
             )
 

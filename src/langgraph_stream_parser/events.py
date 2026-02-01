@@ -12,14 +12,16 @@ from typing import Any, Literal, Union
 
 @dataclass
 class ContentEvent:
-    """Text content from AI message.
+    """Text content from a message.
 
     Attributes:
-        content: The text content from the AI response.
+        content: The text content from the message.
+        role: The role of the message sender ("assistant" or "human").
         node: The name of the graph node that produced this content.
         timestamp: When the event was created.
     """
     content: str
+    role: Literal["assistant", "human"] = "assistant"
     node: str | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
