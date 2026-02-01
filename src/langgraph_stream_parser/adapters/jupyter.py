@@ -87,12 +87,19 @@ class JupyterDisplay:
         self._show_tool_args = show_tool_args
         self._max_content_preview = max_content_preview
 
-        # State tracking - messages as list of (role, content) tuples
-        self._messages: list[tuple[str, str]] = []
+        # State tracking - chronological list of display items
+        # Each item is a tuple: (type, data) where type is "message", "tools", "extraction", "interrupt", "error"
+        self._display_items: list[tuple[str, Any]] = []
+
+        # Current message being accumulated
         self._current_role: str | None = None
         self._current_content: str = ""
+
+        # Tool state (for updating status)
         self._tools: dict[str, ToolState] = {}
-        self._extractions: list[ToolExtractedEvent] = []
+        self._tools_item_index: int | None = None  # Index in _display_items for the tools panel
+
+        # Final state
         self._interrupt: InterruptEvent | None = None
         self._error: ErrorEvent | None = None
         self._complete: bool = False
@@ -131,11 +138,11 @@ class JupyterDisplay:
 
     def reset(self) -> None:
         """Reset display state for a new stream."""
-        self._messages.clear()
+        self._display_items.clear()
         self._current_role = None
         self._current_content = ""
         self._tools.clear()
-        self._extractions.clear()
+        self._tools_item_index = None
         self._interrupt = None
         self._error = None
         self._complete = False
@@ -177,9 +184,24 @@ class JupyterDisplay:
         self._render()
 
     def _flush_current_message(self) -> None:
-        """Flush current message buffer to messages list."""
+        """Flush current message buffer to display items list.
+
+        Merges with the previous message if it has the same role.
+        """
         if self._current_content and self._current_role:
-            self._messages.append((self._current_role, self._current_content))
+            # Check if we can merge with the last message of same role
+            if self._display_items:
+                last_type, last_data = self._display_items[-1]
+                if last_type == "message":
+                    last_role, last_content = last_data
+                    if last_role == self._current_role:
+                        # Merge with previous message
+                        self._display_items[-1] = ("message", (self._current_role, last_content + "\n" + self._current_content))
+                        self._current_content = ""
+                        return
+
+            # Otherwise add as new message
+            self._display_items.append(("message", (self._current_role, self._current_content)))
             self._current_content = ""
 
     def _process_event(self, event: StreamEvent) -> None:
@@ -195,12 +217,19 @@ class JupyterDisplay:
             case ToolCallStartEvent(id=tool_id, name=name, args=args):
                 # Flush any pending content before tool
                 self._flush_current_message()
+
+                # Add tool to tracking
                 self._tools[tool_id] = ToolState(
                     id=tool_id,
                     name=name,
                     args=args,
                     status=ToolStatus.RUNNING,
                 )
+
+                # Add tools panel to display items if not already there
+                if self._tools_item_index is None:
+                    self._tools_item_index = len(self._display_items)
+                    self._display_items.append(("tools", None))  # Placeholder, tools rendered from self._tools
 
             case ToolCallEndEvent(
                 id=tool_id,
@@ -219,15 +248,17 @@ class JupyterDisplay:
                         tool.error_message = error_msg
 
             case ToolExtractedEvent():
-                self._extractions.append(event)
+                self._display_items.append(("extraction", event))
 
             case InterruptEvent():
+                self._flush_current_message()
                 self._interrupt = event
 
             case ErrorEvent():
                 self._error = event
 
             case CompleteEvent():
+                self._flush_current_message()
                 self._complete = True
 
             case StateUpdateEvent():
@@ -237,20 +268,15 @@ class JupyterDisplay:
         """Render the current state to the notebook."""
         from IPython.display import clear_output
         from rich.console import Console
-        from rich.panel import Panel
-        from rich.table import Table
         from rich.text import Text
-        from rich import box
 
         # Clear previous output
         clear_output(wait=True)
 
         # Check if there's anything to render
         has_content = (
-            self._messages or
+            self._display_items or
             self._current_content or
-            self._tools or
-            self._extractions or
             self._interrupt or
             self._error or
             self._complete
@@ -262,184 +288,119 @@ class JupyterDisplay:
         # Create a console that outputs directly to Jupyter
         console = Console(force_jupyter=True, width=100)
 
-        # Render completed messages
-        for role, content in self._messages:
-            self._render_message_panel(console, role, content)
+        # Render items in chronological order
+        for item_type, item_data in self._display_items:
+            if item_type == "message":
+                role, content = item_data
+                self._render_message(console, role, content)
+            elif item_type == "tools":
+                self._render_tools(console)
+            elif item_type == "extraction":
+                self._render_extraction(console, item_data)
 
         # Render current in-progress message
         if self._current_content:
-            self._render_message_panel(console, self._current_role or "assistant", self._current_content)
+            self._render_message(console, self._current_role or "assistant", self._current_content)
 
-        # Render tools table if we have tools
-        if self._tools:
-            table = Table(
-                show_header=True,
-                header_style="bold",
-                box=box.SIMPLE,
-                padding=(0, 1),
-            )
-            table.add_column("Status", width=8)
-            table.add_column("Tool", style="cyan")
-            if self._show_tool_args:
-                table.add_column("Args", max_width=40)
-            table.add_column("Time", justify="right", width=10)
-
-            for tool in self._tools.values():
-                status_icon = self._get_status_icon(tool.status)
-                time_str = self._format_duration(tool.duration_ms)
-                args_str = self._format_args(tool.args) if self._show_tool_args else ""
-
-                row = [status_icon, tool.name]
-                if self._show_tool_args:
-                    row.append(args_str)
-                row.append(time_str)
-                table.add_row(*row)
-
-            console.print(Panel(
-                table,
-                title="[bold yellow]Tools[/bold yellow]",
-                border_style="yellow",
-                box=box.ROUNDED,
-            ))
-
-        # Render extractions
-        for extraction in self._extractions:
-            self._render_extraction(console, extraction)
-
-        # Render interrupt with high visibility
+        # Render interrupt with high visibility (always at end)
         if self._interrupt:
             self._render_interrupt(console, self._interrupt)
 
         # Render error
         if self._error:
-            error_text = Text(self._error.error, style="bold red")
-            console.print(Panel(
-                error_text,
-                title="[bold red]Error[/bold red]",
-                border_style="red",
-                box=box.HEAVY,
-            ))
+            console.print(Text(f"ERROR: {self._error.error}", style="bold red"))
 
         # Render completion
         if self._complete and not self._error:
-            console.print(Text("Stream completed", style="dim green"))
+            console.print(Text("Done", style="dim"))
 
-    def _render_message_panel(self, console: Any, role: str, content: str) -> None:
-        """Render a message panel for the given role."""
-        from rich.panel import Panel
+    def _render_message(self, console: Any, role: str, content: str) -> None:
+        """Render a message compactly with role prefix."""
         from rich.text import Text
-        from rich import box
 
         if role == "human":
-            console.print(Panel(
-                Text(content),
-                title="[bold green]Human[/bold green]",
-                border_style="green",
-                box=box.ROUNDED,
-            ))
+            prefix = Text("USER: ", style="bold green")
         else:
-            console.print(Panel(
-                Text(content),
-                title="[bold blue]Assistant[/bold blue]",
-                border_style="blue",
-                box=box.ROUNDED,
-            ))
+            prefix = Text("ASSISTANT: ", style="bold blue")
+
+        console.print(Text.assemble(prefix, content))
+
+    def _render_tools(self, console: Any) -> None:
+        """Render tools compactly - one line per tool."""
+        from rich.text import Text
+
+        if not self._tools:
+            return
+
+        for tool in self._tools.values():
+            status_icon = self._get_status_icon(tool.status)
+            time_str = f" ({self._format_duration(tool.duration_ms)})" if tool.duration_ms else ""
+
+            if self._show_tool_args and tool.args:
+                args_str = f" {self._format_args(tool.args)}"
+            else:
+                args_str = ""
+
+            line = Text.assemble(
+                ("TOOL: ", "bold yellow"),
+                (status_icon, ""),
+                (" ", ""),
+                (tool.name, "cyan"),
+                (args_str, "dim"),
+                (time_str, "dim"),
+            )
+            console.print(line)
 
     def _render_extraction(self, console: Any, event: ToolExtractedEvent) -> None:
-        """Render a tool extraction event."""
-        from rich.panel import Panel
+        """Render a tool extraction compactly."""
         from rich.text import Text
-        from rich.table import Table
-        from rich import box
 
-        title = f"[bold magenta]{event.extracted_type.title()}[/bold magenta] from {event.tool_name}"
+        data_str = str(event.data)
+        if len(data_str) > self._max_content_preview:
+            data_str = data_str[:self._max_content_preview] + "..."
 
-        if event.extracted_type == "reflection":
-            # Show reflection text
-            text = str(event.data)
-            if len(text) > self._max_content_preview:
-                text = text[:self._max_content_preview] + "..."
-            console.print(Panel(
-                Text(text, style="italic"),
-                title=title,
-                border_style="magenta",
-                box=box.ROUNDED,
-            ))
+        if event.extracted_type == "todos" and isinstance(event.data, list):
+            # Compact todo list
+            tasks = []
+            for item in event.data:
+                if isinstance(item, dict):
+                    done = item.get("done", False)
+                    task = item.get("task", str(item))
+                    mark = "[x]" if done else "[ ]"
+                    tasks.append(f"{mark} {task}")
+            data_str = "; ".join(tasks)
 
-        elif event.extracted_type == "todos":
-            # Show todos as a table
-            if isinstance(event.data, list):
-                table = Table(show_header=True, box=box.SIMPLE)
-                table.add_column("Done", width=4)
-                table.add_column("Task")
-
-                for item in event.data:
-                    if isinstance(item, dict):
-                        done = item.get("done", False)
-                        task = item.get("task", str(item))
-                        done_icon = "[green]" if done else "[ ]"
-                        table.add_row(done_icon, task)
-
-                console.print(Panel(
-                    table,
-                    title=title,
-                    border_style="magenta",
-                    box=box.ROUNDED,
-                ))
-        else:
-            # Generic extraction - show as formatted data
-            text = str(event.data)
-            if len(text) > self._max_content_preview:
-                text = text[:self._max_content_preview] + "..."
-            console.print(Panel(
-                Text(text),
-                title=title,
-                border_style="magenta",
-                box=box.ROUNDED,
-            ))
+        console.print(Text.assemble(
+            (f"{event.extracted_type.upper()}: ", "bold magenta"),
+            (data_str, "italic" if event.extracted_type == "reflection" else ""),
+        ))
 
     def _render_interrupt(self, console: Any, event: InterruptEvent) -> None:
-        """Render an interrupt event with high visibility."""
-        from rich.panel import Panel
+        """Render an interrupt event compactly but visibly."""
         from rich.text import Text
-        from rich.table import Table
-        from rich import box
 
-        # Create content for the interrupt panel
-        content_parts = []
+        # Build action summary
+        actions = []
+        for action in event.action_requests:
+            tool = action.get("tool", "unknown")
+            args = action.get("args", {})
+            args_str = self._format_args(args) if args else ""
+            actions.append(f"{tool}({args_str})" if args_str else tool)
 
-        if event.action_requests:
-            table = Table(show_header=True, box=box.SIMPLE, padding=(0, 1))
-            table.add_column("#", width=3)
-            table.add_column("Tool", style="cyan")
-            table.add_column("Arguments", max_width=50)
+        actions_str = ", ".join(actions) if actions else "none"
 
-            for i, action in enumerate(event.action_requests, 1):
-                tool = action.get("tool", "unknown")
-                args = action.get("args", {})
-                args_str = self._format_args(args)
-                table.add_row(str(i), tool, args_str)
+        # Get allowed decisions
+        decisions = []
+        for config in event.review_configs:
+            decisions.extend(config.get("allowed_decisions", []))
+        decisions_str = "/".join(sorted(set(decisions))) if decisions else "?"
 
-            content_parts.append(table)
-
-            # Show allowed decisions if available
-            if event.review_configs:
-                decisions = []
-                for config in event.review_configs:
-                    allowed = config.get("allowed_decisions", [])
-                    decisions.extend(allowed)
-                if decisions:
-                    decisions_text = Text(
-                        f"\nAllowed decisions: {', '.join(set(decisions))}",
-                        style="dim"
-                    )
-                    content_parts.append(decisions_text)
-
-        console.print(Panel(
-            *content_parts if content_parts else [Text("Interrupt received")],
-            title="[bold white on red] INTERRUPT - Action Required [/bold white on red]",
-            border_style="red",
-            box=box.HEAVY,
+        console.print(Text.assemble(
+            ("INTERRUPT: ", "bold white on red"),
+            (actions_str, "cyan"),
+            (" [", "dim"),
+            (decisions_str, "dim"),
+            ("]", "dim"),
         ))
 
     def _get_status_icon(self, status: ToolStatus) -> str:

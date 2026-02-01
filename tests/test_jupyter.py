@@ -120,8 +120,10 @@ class TestJupyterDisplayEventProcessing:
 
         # Human message - should flush previous
         self.display._process_event(ContentEvent(content="Hello", role="human"))
-        assert len(self.display._messages) == 1
-        assert self.display._messages[0] == ("assistant", "Hi!")
+        # Check display_items instead of _messages
+        message_items = [item for item in self.display._display_items if item[0] == "message"]
+        assert len(message_items) == 1
+        assert message_items[0][1] == ("assistant", "Hi!")
         assert self.display._current_content == "Hello"
         assert self.display._current_role == "human"
 
@@ -185,8 +187,9 @@ class TestJupyterDisplayEventProcessing:
         )
         self.display._process_event(event)
 
-        assert len(self.display._extractions) == 1
-        assert self.display._extractions[0].data == "My thoughts"
+        extraction_items = [item for item in self.display._display_items if item[0] == "extraction"]
+        assert len(extraction_items) == 1
+        assert extraction_items[0][1].data == "My thoughts"
 
     def test_process_interrupt_event(self):
         event = InterruptEvent(
@@ -217,13 +220,11 @@ class TestJupyterDisplayReset:
         display = JupyterDisplay()
 
         # Populate some state
-        display._messages.append(("assistant", "Some content"))
+        display._display_items.append(("message", ("assistant", "Some content")))
         display._current_content = "In progress"
         display._current_role = "assistant"
         display._tools["call_1"] = ToolState(id="1", name="test", args={})
-        display._extractions.append(
-            ToolExtractedEvent(tool_name="t", extracted_type="x", data="y")
-        )
+        display._tools_item_index = 1
         display._interrupt = InterruptEvent(action_requests=[], review_configs=[])
         display._error = ErrorEvent(error="err")
         display._complete = True
@@ -231,11 +232,11 @@ class TestJupyterDisplayReset:
         # Reset
         display.reset()
 
-        assert len(display._messages) == 0
+        assert len(display._display_items) == 0
         assert display._current_content == ""
         assert display._current_role is None
         assert len(display._tools) == 0
-        assert len(display._extractions) == 0
+        assert display._tools_item_index is None
         assert display._interrupt is None
         assert display._error is None
         assert display._complete is False
