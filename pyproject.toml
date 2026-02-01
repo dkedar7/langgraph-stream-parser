@@ -31,12 +31,17 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
+jupyter = [
+    "rich>=13.0",
+    "ipython>=8.0",
+]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
     "pytest-cov>=4.0",
     "langgraph>=0.2.0",
     "langchain-core>=0.2.0",
+    "rich>=13.0",
 ]
 
 [project.urls]
