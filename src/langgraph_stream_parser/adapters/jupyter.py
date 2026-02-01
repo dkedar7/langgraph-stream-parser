@@ -268,7 +268,6 @@ class JupyterDisplay:
         """Render the current state to the notebook."""
         from IPython.display import clear_output
         from rich.console import Console
-        from rich.text import Text
 
         # Clear previous output
         clear_output(wait=True)
@@ -285,8 +284,8 @@ class JupyterDisplay:
         if not has_content:
             return
 
-        # Create a console that outputs directly to Jupyter
-        console = Console(force_jupyter=True, width=100)
+        # Create a compact console
+        console = Console(force_jupyter=True, width=80)
 
         # Render items in chronological order
         for item_type, item_data in self._display_items:
@@ -302,90 +301,98 @@ class JupyterDisplay:
         if self._current_content:
             self._render_message(console, self._current_role or "assistant", self._current_content)
 
-        # Render interrupt with high visibility (always at end)
+        # Render interrupt
         if self._interrupt:
             self._render_interrupt(console, self._interrupt)
 
         # Render error
         if self._error:
-            console.print(Text(f"ERROR: {self._error.error}", style="bold red"))
+            console.print(f"[red]ERR:[/red] {self._error.error}")
 
         # Render completion
         if self._complete and not self._error:
-            console.print(Text("Done", style="dim"))
+            console.print("[dim]done[/dim]")
 
     def _render_message(self, console: Any, role: str, content: str) -> None:
-        """Render a message compactly with role prefix."""
-        from rich.text import Text
+        """Render a message in a compact panel."""
+        from rich.panel import Panel
+        from rich import box
+
+        # Truncate very long content for display
+        display_content = content[:500] + "..." if len(content) > 500 else content
 
         if role == "human":
-            prefix = Text("USER: ", style="bold green")
+            console.print(Panel(
+                display_content,
+                title="[green]user[/green]",
+                border_style="green",
+                box=box.ROUNDED,
+                padding=(0, 1),
+            ))
         else:
-            prefix = Text("ASSISTANT: ", style="bold blue")
-
-        console.print(Text.assemble(prefix, content))
+            console.print(Panel(
+                display_content,
+                title="[blue]assistant[/blue]",
+                border_style="blue",
+                box=box.ROUNDED,
+                padding=(0, 1),
+            ))
 
     def _render_tools(self, console: Any) -> None:
-        """Render tools compactly - one line per tool."""
-        from rich.text import Text
+        """Render tools in a compact panel."""
+        from rich.panel import Panel
+        from rich import box
 
         if not self._tools:
             return
 
+        lines = []
         for tool in self._tools.values():
-            status_icon = self._get_status_icon(tool.status)
-            time_str = f" ({self._format_duration(tool.duration_ms)})" if tool.duration_ms else ""
-
+            status = self._get_status_icon(tool.status)
+            time_str = f" {self._format_duration(tool.duration_ms)}" if tool.duration_ms else ""
+            args_str = ""
             if self._show_tool_args and tool.args:
-                args_str = f" {self._format_args(tool.args)}"
-            else:
-                args_str = ""
+                args_str = f" [dim]{self._format_args(tool.args)}[/dim]"
+            lines.append(f"{status} [cyan]{tool.name}[/cyan]{args_str}{time_str}")
 
-            line = Text.assemble(
-                ("TOOL: ", "bold yellow"),
-                (status_icon, ""),
-                (" ", ""),
-                (tool.name, "cyan"),
-                (args_str, "dim"),
-                (time_str, "dim"),
-            )
-            console.print(line)
+        console.print(Panel(
+            "\n".join(lines),
+            title="[yellow]tools[/yellow]",
+            border_style="yellow",
+            box=box.ROUNDED,
+            padding=(0, 1),
+        ))
 
     def _render_extraction(self, console: Any, event: ToolExtractedEvent) -> None:
-        """Render a tool extraction compactly."""
-        from rich.text import Text
-
+        """Render extraction inline."""
         data_str = str(event.data)
         if len(data_str) > self._max_content_preview:
             data_str = data_str[:self._max_content_preview] + "..."
 
         if event.extracted_type == "todos" and isinstance(event.data, list):
-            # Compact todo list
             tasks = []
             for item in event.data:
                 if isinstance(item, dict):
                     done = item.get("done", False)
                     task = item.get("task", str(item))
-                    mark = "[x]" if done else "[ ]"
-                    tasks.append(f"{mark} {task}")
-            data_str = "; ".join(tasks)
+                    mark = "[green]x[/green]" if done else " "
+                    tasks.append(f"[{mark}] {task}")
+            data_str = " | ".join(tasks)
 
-        console.print(Text.assemble(
-            (f"{event.extracted_type.upper()}: ", "bold magenta"),
-            (data_str, "italic" if event.extracted_type == "reflection" else ""),
-        ))
+        style = "italic" if event.extracted_type == "reflection" else ""
+        console.print(f"[magenta]{event.extracted_type}:[/magenta] [{style}]{data_str}[/{style}]")
 
     def _render_interrupt(self, console: Any, event: InterruptEvent) -> None:
-        """Render an interrupt event compactly but visibly."""
-        from rich.text import Text
+        """Render interrupt compactly in a panel."""
+        from rich.panel import Panel
+        from rich import box
 
-        # Build action summary
         actions = []
         for action in event.action_requests:
             tool = action.get("tool", "unknown")
             args = action.get("args", {})
             args_str = self._format_args(args) if args else ""
-            actions.append(f"{tool}({args_str})" if args_str else tool)
+            actions.append(f"[cyan]{tool}[/cyan]({args_str})" if args_str else f"[cyan]{tool}[/cyan]")
 
         actions_str = ", ".join(actions) if actions else "none"
 
@@ -395,12 +402,12 @@ class JupyterDisplay:
             decisions.extend(config.get("allowed_decisions", []))
         decisions_str = "/".join(sorted(set(decisions))) if decisions else "?"
 
-        console.print(Text.assemble(
-            ("INTERRUPT: ", "bold white on red"),
-            (actions_str, "cyan"),
-            (" [", "dim"),
-            (decisions_str, "dim"),
-            ("]", "dim"),
+        console.print(Panel(
+            f"{actions_str}\n[dim]options: {decisions_str}[/dim]",
+            title="[bold white on red]interrupt[/bold white on red]",
+            border_style="red",
+            box=box.ROUNDED,
+            padding=(0, 1),
         ))
 
     def _get_status_icon(self, status: ToolStatus) -> str:
