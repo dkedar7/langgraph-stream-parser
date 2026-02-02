@@ -3,11 +3,8 @@ import pytest
 from unittest.mock import MagicMock, patch
 from datetime import datetime, timedelta
 
-from langgraph_stream_parser.adapters.jupyter import (
-    JupyterDisplay,
-    ToolStatus,
-    ToolState,
-)
+from langgraph_stream_parser.adapters.base import ToolStatus, ToolState
+from langgraph_stream_parser.adapters.jupyter import JupyterDisplay
 from langgraph_stream_parser.events import (
     ContentEvent,
     ToolCallStartEvent,
@@ -77,24 +74,24 @@ class TestJupyterDisplayHelpers:
         assert "red" in icon
 
     def test_format_duration_none(self):
-        assert self.display._format_duration(None) == ""
+        assert self.display.format_duration(None) == ""
 
     def test_format_duration_ms(self):
-        assert self.display._format_duration(500) == "500ms"
+        assert self.display.format_duration(500) == "500ms"
 
     def test_format_duration_seconds(self):
-        assert self.display._format_duration(1500) == "1.5s"
+        assert self.display.format_duration(1500) == "1.5s"
 
     def test_format_args_empty(self):
-        assert self.display._format_args({}) == ""
+        assert self.display.format_args({}) == ""
 
     def test_format_args_simple(self):
-        result = self.display._format_args({"key": "value"})
+        result = self.display.format_args({"key": "value"})
         assert "key=value" in result
 
     def test_format_args_truncates_long_values(self):
         long_value = "x" * 50
-        result = self.display._format_args({"key": long_value})
+        result = self.display.format_args({"key": long_value})
         assert "..." in result
         assert len(result) <= 45  # key= plus truncated value
 
@@ -273,7 +270,7 @@ class TestJupyterDisplayRendering:
         self.display = JupyterDisplay()
 
     @patch('langgraph_stream_parser.adapters.jupyter.JupyterDisplay._check_dependencies')
-    @patch('langgraph_stream_parser.adapters.jupyter.JupyterDisplay._render')
+    @patch('langgraph_stream_parser.adapters.jupyter.JupyterDisplay.render')
     def test_update_calls_render(self, mock_render, mock_check):
         event = ContentEvent(content="test")
         self.display.update(event)
@@ -282,9 +279,10 @@ class TestJupyterDisplayRendering:
         mock_render.assert_called_once()
 
     @patch('langgraph_stream_parser.adapters.jupyter.JupyterDisplay._check_dependencies')
-    @patch('langgraph_stream_parser.adapters.jupyter.JupyterDisplay._render')
-    def test_stream_processes_all_events(self, mock_render, mock_check):
-        mock_stream = iter([
+    @patch('langgraph_stream_parser.adapters.jupyter.JupyterDisplay.render')
+    def test_run_processes_all_events(self, mock_render, mock_check):
+        mock_graph = MagicMock()
+        mock_graph.stream.return_value = iter([
             {"agent": {"messages": [MagicMock(content="Hello", tool_calls=[])]}},
         ])
         mock_parser = MagicMock()
@@ -293,6 +291,76 @@ class TestJupyterDisplayRendering:
             CompleteEvent(),
         ])
 
-        self.display.stream(mock_stream, parser=mock_parser)
+        self.display.run(
+            graph=mock_graph,
+            input_data={"messages": [("user", "test")]},
+            parser=mock_parser,
+        )
 
         assert mock_render.call_count == 2  # Once for each event
+
+
+class TestBaseAdapterHelpers:
+    """Test helper methods from BaseAdapter."""
+
+    def setup_method(self):
+        self.display = JupyterDisplay()
+
+    def test_get_allowed_decisions(self):
+        event = InterruptEvent(
+            action_requests=[],
+            review_configs=[{"allowed_decisions": ["approve", "reject", "edit"]}],
+        )
+        allowed = self.display.get_allowed_decisions(event)
+        assert allowed == {"approve", "reject", "edit"}
+
+    def test_get_allowed_decisions_default(self):
+        event = InterruptEvent(
+            action_requests=[],
+            review_configs=[{}],
+        )
+        allowed = self.display.get_allowed_decisions(event)
+        assert allowed == {"approve", "reject"}
+
+    def test_build_decisions(self):
+        event = InterruptEvent(
+            action_requests=[{"tool": "bash", "args": {"cmd": "ls"}}],
+            review_configs=[{"allowed_decisions": ["approve", "reject"]}],
+        )
+        decisions = self.display.build_decisions(event, "approve")
+        assert decisions == [{"type": "approve"}]
+
+    def test_build_decisions_multiple(self):
+        event = InterruptEvent(
+            action_requests=[
+                {"tool": "bash", "args": {"cmd": "ls"}},
+                {"tool": "bash", "args": {"cmd": "pwd"}},
+            ],
+            review_configs=[{"allowed_decisions": ["approve", "reject"]}],
+        )
+        decisions = self.display.build_decisions(event, "reject")
+        assert decisions == [{"type": "reject"}, {"type": "reject"}]
+
+    def test_format_todos(self):
+        todos = [
+            {"status": "completed", "content": "Task 1"},
+            {"status": "in_progress", "content": "Task 2"},
+            {"status": "pending", "content": "Task 3"},
+        ]
+        result = self.display.format_todos(todos)
+        assert result == [
+            ("completed", "Task 1"),
+            ("in_progress", "Task 2"),
+            ("pending", "Task 3"),
+        ]
+
+    def test_format_todos_legacy_format(self):
+        todos = [
+            {"done": True, "task": "Task 1"},
+            {"done": False, "task": "Task 2"},
+        ]
+        result = self.display.format_todos(todos)
+        assert result == [
+            ("completed", "Task 1"),
+            ("pending", "Task 2"),
+        ]
