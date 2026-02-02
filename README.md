@@ -199,6 +199,80 @@ for update in resume_graph_from_interrupt(agent, decisions=[{"type": "approve"}]
     handle_update(update)
 ```
 
+## Display Adapters
+
+Pre-built adapters for rendering stream events in different environments:
+
+### CLIAdapter - Styled Terminal Output
+
+```python
+from langgraph_stream_parser.adapters import CLIAdapter
+
+adapter = CLIAdapter()
+adapter.run(
+    graph=agent,
+    input_data={"messages": [("user", "Hello")]},
+    config={"configurable": {"thread_id": "my-thread"}}
+)
+```
+
+Features:
+- ANSI color formatting
+- Spinner animation during tool execution
+- Interactive arrow-key interrupt handling
+
+### PrintAdapter - Plain Text Output
+
+```python
+from langgraph_stream_parser.adapters import PrintAdapter
+
+adapter = PrintAdapter()
+adapter.run(graph=agent, input_data=input_data, config=config)
+```
+
+Universal output that works in any Python environment without dependencies.
+
+### JupyterDisplay - Rich Notebook Display
+
+```python
+from langgraph_stream_parser.adapters.jupyter import JupyterDisplay
+
+display = JupyterDisplay()
+display.run(graph=agent, input_data=input_data, config=config)
+```
+
+Requires: `pip install langgraph-stream-parser[jupyter]`
+
+### Adapter Options
+
+All adapters support:
+
+```python
+adapter = CLIAdapter(
+    show_tool_args=True,           # Show tool arguments
+    max_content_preview=200,       # Max chars for extracted content
+    reflection_types={"thinking"}, # Custom reflection type names
+    todo_types={"tasks"},          # Custom todo type names
+)
+```
+
+### Custom Adapters
+
+Extend `BaseAdapter` for custom rendering:
+
+```python
+from langgraph_stream_parser.adapters import BaseAdapter
+
+class MyAdapter(BaseAdapter):
+    def render(self):
+        # Implement your rendering logic
+        pass
+
+    def prompt_interrupt(self, event):
+        # Handle interrupt prompts
+        return [{"type": "approve"}]
+```
+
 ## Built-in Extractors
 
 The package includes extractors for common LangGraph tools:
