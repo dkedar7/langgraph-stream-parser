@@ -40,6 +40,7 @@ from .events import (
     CompleteEvent,
     ErrorEvent,
     StreamEvent,
+    event_to_dict,
 )
 from .extractors.base import ToolExtractor
 from .extractors.builtins import ThinkToolExtractor, TodoExtractor
@@ -73,6 +74,8 @@ __all__ = [
     # Resume utilities
     "create_resume_input",
     "prepare_agent_input",
+    # Serialization
+    "event_to_dict",
     # Legacy/compat functions
     "stream_graph_updates",
     "astream_graph_updates",
