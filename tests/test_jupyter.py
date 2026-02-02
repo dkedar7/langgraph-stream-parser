@@ -135,8 +135,9 @@ class TestJupyterDisplayEventProcessing:
         )
         self.display._process_event(event)
 
-        assert "call_1" in self.display._tools
-        tool = self.display._tools["call_1"]
+        assert "call_1" in self.display._tool_indices
+        idx = self.display._tool_indices["call_1"]
+        _, tool = self.display._display_items[idx]
         assert tool.name == "search"
         assert tool.status == ToolStatus.RUNNING
 
@@ -156,7 +157,8 @@ class TestJupyterDisplayEventProcessing:
         )
         self.display._process_event(end_event)
 
-        tool = self.display._tools["call_1"]
+        idx = self.display._tool_indices["call_1"]
+        _, tool = self.display._display_items[idx]
         assert tool.status == ToolStatus.SUCCESS
         assert tool.end_time is not None
 
@@ -175,7 +177,8 @@ class TestJupyterDisplayEventProcessing:
         )
         self.display._process_event(end_event)
 
-        tool = self.display._tools["call_1"]
+        idx = self.display._tool_indices["call_1"]
+        _, tool = self.display._display_items[idx]
         assert tool.status == ToolStatus.ERROR
         assert tool.error_message == "Connection failed"
 
@@ -223,8 +226,8 @@ class TestJupyterDisplayReset:
         display._display_items.append(("message", ("assistant", "Some content")))
         display._current_content = "In progress"
         display._current_role = "assistant"
-        display._tools["call_1"] = ToolState(id="1", name="test", args={})
-        display._tools_item_index = 1
+        display._tool_indices["call_1"] = 0
+        display._display_items.append(("tool", ToolState(id="1", name="test", args={})))
         display._interrupt = InterruptEvent(action_requests=[], review_configs=[])
         display._error = ErrorEvent(error="err")
         display._complete = True
@@ -235,8 +238,7 @@ class TestJupyterDisplayReset:
         assert len(display._display_items) == 0
         assert display._current_content == ""
         assert display._current_role is None
-        assert len(display._tools) == 0
-        assert display._tools_item_index is None
+        assert len(display._tool_indices) == 0
         assert display._interrupt is None
         assert display._error is None
         assert display._complete is False

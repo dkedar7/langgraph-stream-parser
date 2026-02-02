@@ -88,16 +88,15 @@ class JupyterDisplay:
         self._max_content_preview = max_content_preview
 
         # State tracking - chronological list of display items
-        # Each item is a tuple: (type, data) where type is "message", "tools", "extraction", "interrupt", "error"
+        # Each item is a tuple: (type, data) where type is "message", "tool", "extraction", "interrupt", "error"
         self._display_items: list[tuple[str, Any]] = []
 
         # Current message being accumulated
         self._current_role: str | None = None
         self._current_content: str = ""
 
-        # Tool state (for updating status)
-        self._tools: dict[str, ToolState] = {}
-        self._tools_item_index: int | None = None  # Index in _display_items for the tools panel
+        # Tool state (for updating status) - maps tool_id to index in _display_items
+        self._tool_indices: dict[str, int] = {}
 
         # Final state
         self._interrupt: InterruptEvent | None = None
@@ -141,8 +140,7 @@ class JupyterDisplay:
         self._display_items.clear()
         self._current_role = None
         self._current_content = ""
-        self._tools.clear()
-        self._tools_item_index = None
+        self._tool_indices.clear()
         self._interrupt = None
         self._error = None
         self._complete = False
@@ -218,18 +216,15 @@ class JupyterDisplay:
                 # Flush any pending content before tool
                 self._flush_current_message()
 
-                # Add tool to tracking
-                self._tools[tool_id] = ToolState(
+                # Create tool state and add to display items
+                tool_state = ToolState(
                     id=tool_id,
                     name=name,
                     args=args,
                     status=ToolStatus.RUNNING,
                 )
-
-                # Add tools panel to display items if not already there
-                if self._tools_item_index is None:
-                    self._tools_item_index = len(self._display_items)
-                    self._display_items.append(("tools", None))  # Placeholder, tools rendered from self._tools
+                self._tool_indices[tool_id] = len(self._display_items)
+                self._display_items.append(("tool", tool_state))
 
             case ToolCallEndEvent(
                 id=tool_id,
@@ -237,8 +232,9 @@ class JupyterDisplay:
                 status=status,
                 error_message=error_msg,
             ):
-                if tool_id in self._tools:
-                    tool = self._tools[tool_id]
+                if tool_id in self._tool_indices:
+                    idx = self._tool_indices[tool_id]
+                    _, tool = self._display_items[idx]
                     tool.end_time = datetime.now()
                     tool.result = result
                     if status == "success":
@@ -292,8 +288,8 @@ class JupyterDisplay:
             if item_type == "message":
                 role, content = item_data
                 self._render_message(console, role, content)
-            elif item_type == "tools":
-                self._render_tools(console)
+            elif item_type == "tool":
+                self._render_tool(console, item_data)
             elif item_type == "extraction":
                 self._render_extraction(console, item_data)
 
@@ -338,30 +334,14 @@ class JupyterDisplay:
                 padding=(0, 1),
             ))
 
-    def _render_tools(self, console: Any) -> None:
-        """Render tools in a compact panel."""
-        from rich.panel import Panel
-        from rich import box
-
-        if not self._tools:
-            return
-
-        lines = []
-        for tool in self._tools.values():
-            status = self._get_status_icon(tool.status)
-            time_str = f" {self._format_duration(tool.duration_ms)}" if tool.duration_ms else ""
-            args_str = ""
-            if self._show_tool_args and tool.args:
-                args_str = f" [dim]{self._format_args(tool.args)}[/dim]"
-            lines.append(f"{status} [cyan]{tool.name}[/cyan]{args_str}{time_str}")
-
-        console.print(Panel(
-            "\n".join(lines),
-            title="[yellow]tools[/yellow]",
-            border_style="yellow",
-            box=box.ROUNDED,
-            padding=(0, 1),
-        ))
+    def _render_tool(self, console: Any, tool: ToolState) -> None:
+        """Render a single tool call inline."""
+        status = self._get_status_icon(tool.status)
+        time_str = f" {self._format_duration(tool.duration_ms)}" if tool.duration_ms else ""
+        args_str = ""
+        if self._show_tool_args and tool.args:
+            args_str = f" [dim]{self._format_args(tool.args)}[/dim]"
+        console.print(f"{status} [cyan]{tool.name}[/cyan]{args_str}{time_str}")
 
     def _render_extraction(self, console: Any, event: ToolExtractedEvent) -> None:
         """Render extraction inline."""
@@ -373,14 +353,30 @@ class JupyterDisplay:
             tasks = []
             for item in event.data:
                 if isinstance(item, dict):
-                    done = item.get("done", False)
-                    task = item.get("task", str(item))
-                    mark = "[green]x[/green]" if done else " "
-                    tasks.append(f"[{mark}] {task}")
-            data_str = " | ".join(tasks)
+                    # Support both formats: {status, content} and {done, task}
+                    status = item.get("status", "pending")
+                    content = item.get("content") or item.get("task", str(item))
 
-        style = "italic" if event.extracted_type == "reflection" else ""
-        console.print(f"[magenta]{event.extracted_type}:[/magenta] [{style}]{data_str}[/{style}]")
+                    # Handle done field as fallback
+                    if "done" in item:
+                        status = "completed" if item["done"] else "pending"
+
+                    # Status icons
+                    if status == "completed":
+                        icon = "[green]✓[/green]"
+                    elif status == "in_progress":
+                        icon = "[yellow]▶[/yellow]"
+                    else:  # pending
+                        icon = "[dim]○[/dim]"
+
+                    tasks.append(f"{icon} {content}")
+            if tasks:
+                data_str = "\n  " + "\n  ".join(tasks)
+
+        if event.extracted_type == "reflection":
+            console.print(f"[magenta]{event.extracted_type}:[/magenta] [italic]{data_str}[/italic]")
+        else:
+            console.print(f"[magenta]{event.extracted_type}:[/magenta] {data_str}")
 
     def _render_interrupt(self, console: Any, event: InterruptEvent) -> None:
         """Render interrupt compactly in a panel."""
