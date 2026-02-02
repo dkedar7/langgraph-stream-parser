@@ -40,6 +40,8 @@ class JupyterDisplay(BaseAdapter):
         show_timestamps: bool = False,
         show_tool_args: bool = True,
         max_content_preview: int = 200,
+        reflection_types: set[str] | list[str] | None = None,
+        todo_types: set[str] | list[str] | None = None,
     ):
         """Initialize the Jupyter display.
 
@@ -47,11 +49,17 @@ class JupyterDisplay(BaseAdapter):
             show_timestamps: Show timestamps on events.
             show_tool_args: Show tool arguments in tool status lines.
             max_content_preview: Max characters for extracted content preview.
+            reflection_types: Set of extracted_type values to render as reflections
+                (italic formatting). Defaults to {"reflection"}.
+            todo_types: Set of extracted_type values to render as todo lists
+                (checkbox formatting). Defaults to {"todos"}.
         """
         super().__init__(
             show_timestamps=show_timestamps,
             show_tool_args=show_tool_args,
             max_content_preview=max_content_preview,
+            reflection_types=reflection_types,
+            todo_types=todo_types,
         )
 
         # Lazy imports
@@ -222,7 +230,8 @@ class JupyterDisplay(BaseAdapter):
         if len(data_str) > self._max_content_preview:
             data_str = data_str[:self._max_content_preview] + "..."
 
-        if event.extracted_type == "todos" and isinstance(event.data, list):
+        # Special handling for todo types
+        if event.extracted_type in self._todo_types and isinstance(event.data, list):
             todos = self.format_todos(event.data)
             if todos:
                 lines = []
@@ -236,7 +245,8 @@ class JupyterDisplay(BaseAdapter):
                     lines.append(f"{icon} {content}")
                 data_str = "\n  " + "\n  ".join(lines)
 
-        if event.extracted_type == "reflection":
+        # Render with italic for reflection types
+        if event.extracted_type in self._reflection_types:
             console.print(f"[magenta]{event.extracted_type}:[/magenta] [italic]{data_str}[/italic]")
         else:
             console.print(f"[magenta]{event.extracted_type}:[/magenta] {data_str}")

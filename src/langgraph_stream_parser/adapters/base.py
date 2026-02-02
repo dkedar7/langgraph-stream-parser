@@ -85,12 +85,18 @@ class BaseAdapter(ABC):
         )
     """
 
+    # Default extracted types for special rendering
+    DEFAULT_REFLECTION_TYPES: set[str] = {"reflection"}
+    DEFAULT_TODO_TYPES: set[str] = {"todos"}
+
     def __init__(
         self,
         *,
         show_timestamps: bool = False,
         show_tool_args: bool = True,
         max_content_preview: int = 200,
+        reflection_types: set[str] | list[str] | None = None,
+        todo_types: set[str] | list[str] | None = None,
     ):
         """Initialize the adapter.
 
@@ -98,10 +104,24 @@ class BaseAdapter(ABC):
             show_timestamps: Show timestamps on events.
             show_tool_args: Show tool arguments in tool displays.
             max_content_preview: Max characters for extracted content preview.
+            reflection_types: Set of extracted_type values to render as reflections
+                (italic/special formatting). Defaults to {"reflection"}.
+            todo_types: Set of extracted_type values to render as todo lists
+                (checkbox formatting). Defaults to {"todos"}.
         """
         self._show_timestamps = show_timestamps
         self._show_tool_args = show_tool_args
         self._max_content_preview = max_content_preview
+
+        # Configurable extraction types for special rendering
+        self._reflection_types: set[str] = (
+            set(reflection_types) if reflection_types is not None
+            else self.DEFAULT_REFLECTION_TYPES.copy()
+        )
+        self._todo_types: set[str] = (
+            set(todo_types) if todo_types is not None
+            else self.DEFAULT_TODO_TYPES.copy()
+        )
 
         # State tracking - chronological list of display items
         # Each item is a tuple: (type, data) where type is "message", "tool", "extraction"
@@ -137,6 +157,7 @@ class BaseAdapter(ABC):
         config: dict[str, Any] | None = None,
         parser: StreamParser | None = None,
         stream_mode: str = "updates",
+        **stream_kwargs: Any,
     ) -> None:
         """Run a LangGraph agent with live display and interrupt handling.
 
@@ -154,13 +175,16 @@ class BaseAdapter(ABC):
             config: LangGraph config dict (must include thread_id for resumption).
             parser: Optional pre-configured StreamParser.
             stream_mode: The stream mode to use.
+            **stream_kwargs: Additional arguments passed to graph.stream()
+                (e.g., interrupt_before, interrupt_after, debug).
 
         Example:
             display = JupyterDisplay()
             display.run(
                 graph=agent,
                 input_data={"messages": [("user", "Hello")]},
-                config={"configurable": {"thread_id": "my-session"}}
+                config={"configurable": {"thread_id": "my-session"}},
+                interrupt_before=["tools"],
             )
         """
         self.reset()
@@ -172,7 +196,12 @@ class BaseAdapter(ABC):
 
         while True:
             # Stream until completion or interrupt
-            stream = graph.stream(current_input, config=config, stream_mode=stream_mode)
+            stream = graph.stream(
+                current_input,
+                config=config,
+                stream_mode=stream_mode,
+                **stream_kwargs,
+            )
 
             for event in parser.parse(stream, stream_mode=stream_mode):
                 self.update(event)
