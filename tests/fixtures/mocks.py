@@ -24,8 +24,8 @@ def _create_mock_class(name: str, fields: dict, defaults: dict = None):
 # Create mock classes with proper names
 AIMessage = _create_mock_class(
     "AIMessage",
-    {"content": Any, "id": str, "tool_calls": list},
-    {"id": "msg_123", "tool_calls": list}
+    {"content": Any, "id": str, "tool_calls": list, "usage_metadata": dict},
+    {"id": "msg_123", "tool_calls": list, "usage_metadata": None}
 )
 
 AIMessageChunk = _create_mock_class(
@@ -36,8 +36,8 @@ AIMessageChunk = _create_mock_class(
 
 ToolMessage = _create_mock_class(
     "ToolMessage",
-    {"content": Any, "name": str, "tool_call_id": str, "status": str},
-    {"status": None}
+    {"content": Any, "name": str, "tool_call_id": str, "status": str, "artifact": Any},
+    {"status": None, "artifact": None}
 )
 
 HumanMessage = _create_mock_class(
@@ -175,6 +175,38 @@ WRITE_TODOS_EMBEDDED = {
     }
 }
 
+DISPLAY_INLINE_ARTIFACT_MESSAGE = {
+    "tools": {
+        "messages": [
+            ToolMessage(
+                content="Displayed dataframe inline: Sales Data",
+                name="display_inline",
+                tool_call_id="call_display",
+                artifact={
+                    "type": "display_inline",
+                    "display_type": "dataframe",
+                    "title": "Sales Data",
+                    "data": "<table><tr><td>A</td></tr></table>",
+                    "status": "success",
+                    "error": None,
+                },
+            )
+        ]
+    }
+}
+
+DISPLAY_INLINE_CONTENT_MESSAGE = {
+    "tools": {
+        "messages": [
+            ToolMessage(
+                content='{"type": "display_inline", "display_type": "image", "title": "Chart", "data": "base64data", "status": "success", "error": null}',
+                name="display_inline",
+                tool_call_id="call_display2",
+            )
+        ]
+    }
+}
+
 INTERRUPT_SIMPLE = {
     "__interrupt__": (
         MockInterrupt(value="Please confirm you want to proceed"),
@@ -236,6 +268,21 @@ MULTI_MESSAGE_CONTENT = {
     }
 }
 
+AI_MESSAGE_WITH_USAGE = {
+    "agent": {
+        "messages": [
+            AIMessage(
+                content="Done.",
+                usage_metadata={
+                    "input_tokens": 150,
+                    "output_tokens": 42,
+                    "total_tokens": 192,
+                }
+            )
+        ]
+    }
+}
+
 # --- Dual / Messages mode fixtures ---
 
 MESSAGES_METADATA = {"langgraph_node": "agent", "langgraph_step": 1}
@@ -254,11 +301,35 @@ MESSAGES_CHUNK_WITH_TOOL_CALL_CHUNKS = (
     MESSAGES_METADATA,
 )
 
+# Real-world scenario: tool call chunk with content containing stringified tool dict
+MESSAGES_CHUNK_TOOL_WITH_CONTENT = (
+    AIMessageChunk(
+        content="{'id': 'toolu_013sLF47f2hfJaysysskcFjK', 'input': {}, 'name': 'ls', 'type': 'tool_use'}",
+        tool_call_chunks=[
+            {"name": "ls", "args": "", "id": "toolu_013sLF47f2hfJaysysskcFjK", "index": 0}
+        ],
+    ),
+    MESSAGES_METADATA,
+)
+
+# Tool call chunk with tool_calls list (not just chunks)
+MESSAGES_CHUNK_WITH_TOOL_CALLS = (
+    AIMessageChunk(
+        content="",
+        tool_calls=[
+            {"id": "call_1", "name": "search", "args": {"query": "weather"}}
+        ],
+    ),
+    MESSAGES_METADATA,
+)
+
 # Dual-mode stream chunks: (mode_name, data) tuples
 DUAL_MESSAGES_TOKEN_1 = ("messages", MESSAGES_CHUNK_TOKEN_1)
 DUAL_MESSAGES_TOKEN_2 = ("messages", MESSAGES_CHUNK_TOKEN_2)
 DUAL_MESSAGES_EMPTY = ("messages", MESSAGES_CHUNK_EMPTY)
 DUAL_MESSAGES_TOOL_CHUNK = ("messages", MESSAGES_CHUNK_WITH_TOOL_CALL_CHUNKS)
+DUAL_MESSAGES_TOOL_WITH_CONTENT = ("messages", MESSAGES_CHUNK_TOOL_WITH_CONTENT)
+DUAL_MESSAGES_TOOL_CALLS = ("messages", MESSAGES_CHUNK_WITH_TOOL_CALLS)
 
 DUAL_UPDATES_SIMPLE = ("updates", SIMPLE_AI_MESSAGE)
 DUAL_UPDATES_TOOL_CALL = ("updates", AI_MESSAGE_WITH_TOOL_CALLS)

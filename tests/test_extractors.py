@@ -5,6 +5,7 @@ import json
 from langgraph_stream_parser.extractors.builtins import (
     ThinkToolExtractor,
     TodoExtractor,
+    DisplayInlineExtractor,
 )
 from langgraph_stream_parser.extractors.messages import (
     extract_message_content,
@@ -106,6 +107,56 @@ class TestTodoExtractor:
     def test_extract_invalid_returns_none(self):
         content = "No array here"
         result = self.extractor.extract(content)
+        assert result is None
+
+
+class TestDisplayInlineExtractor:
+    def setup_method(self):
+        self.extractor = DisplayInlineExtractor()
+
+    def test_tool_name(self):
+        assert self.extractor.tool_name == "display_inline"
+        assert self.extractor.extracted_type == "display_inline"
+
+    def test_extract_from_json_string(self):
+        content = '{"type": "display_inline", "display_type": "image", "title": "Chart", "data": "base64data", "status": "success"}'
+        result = self.extractor.extract(content)
+        assert result is not None
+        assert result["display_type"] == "image"
+        assert result["title"] == "Chart"
+
+    def test_extract_from_dict(self):
+        """When artifact is a dict (content_and_artifact pattern)."""
+        content = {
+            "type": "display_inline",
+            "display_type": "dataframe",
+            "title": "Sales Data",
+            "data": "<table>...</table>",
+            "status": "success",
+            "error": None,
+        }
+        result = self.extractor.extract(content)
+        assert result is not None
+        assert result["display_type"] == "dataframe"
+        assert result["title"] == "Sales Data"
+
+    def test_extract_from_dict_without_display_type_returns_none(self):
+        content = {"some_key": "value"}
+        result = self.extractor.extract(content)
+        assert result is None
+
+    def test_extract_from_plain_string_returns_none(self):
+        content = "Displayed dataframe inline: Sales Data"
+        result = self.extractor.extract(content)
+        assert result is None
+
+    def test_extract_from_invalid_json_returns_none(self):
+        content = "not json at all"
+        result = self.extractor.extract(content)
+        assert result is None
+
+    def test_extract_none_returns_none(self):
+        result = self.extractor.extract(None)
         assert result is None
 
 
