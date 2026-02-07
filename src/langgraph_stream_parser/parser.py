@@ -13,7 +13,7 @@ from .events import (
     ToolCallStartEvent,
 )
 from .extractors.base import ToolExtractor
-from .extractors.builtins import ThinkToolExtractor, TodoExtractor
+from .extractors.builtins import ThinkToolExtractor, TodoExtractor, DisplayInlineExtractor
 from .handlers.messages import MessagesHandler
 from .handlers.updates import UpdatesHandler
 
@@ -116,6 +116,7 @@ class StreamParser:
         """Register the built-in tool extractors."""
         self.register_extractor(ThinkToolExtractor())
         self.register_extractor(TodoExtractor())
+        self.register_extractor(DisplayInlineExtractor())
 
     def register_extractor(self, extractor: ToolExtractor) -> None:
         """Register a custom tool extractor.

@@ -282,6 +282,38 @@ class StateUpdateEvent:
 
 
 @dataclass
+class UsageEvent:
+    """Token usage metadata from a model invocation.
+
+    Emitted when an AIMessage contains usage_metadata with token counts.
+    These are per-invocation counts (not cumulative); consumers should
+    accumulate them if a running total is desired.
+
+    Attributes:
+        input_tokens: Number of input (prompt) tokens.
+        output_tokens: Number of output (completion) tokens.
+        total_tokens: Sum of input and output tokens.
+        node: The name of the graph node that produced this usage.
+        timestamp: When the event was created.
+    """
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    node: str | None = None
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict for web APIs."""
+        return {
+            "type": "usage",
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "total_tokens": self.total_tokens,
+            "node": self.node,
+        }
+
+
+@dataclass
 class CompleteEvent:
     """Stream completed successfully.
 
@@ -351,6 +383,7 @@ StreamEvent = Union[
     ToolExtractedEvent,
     InterruptEvent,
     StateUpdateEvent,
+    UsageEvent,
     CompleteEvent,
     ErrorEvent,
 ]

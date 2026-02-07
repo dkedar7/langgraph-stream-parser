@@ -14,6 +14,7 @@ from ..events import (
     ToolCallEndEvent,
     ToolCallStartEvent,
     ToolExtractedEvent,
+    UsageEvent,
 )
 from ..extractors.base import ToolExtractor
 from ..extractors.interrupts import process_interrupt
@@ -196,6 +197,20 @@ class UpdatesHandler:
                     node=node_name,
                 )
 
+        # Extract token usage if present
+        usage = getattr(message, 'usage_metadata', None)
+        if usage and isinstance(usage, dict):
+            input_tokens = usage.get('input_tokens', 0)
+            output_tokens = usage.get('output_tokens', 0)
+            total_tokens = usage.get('total_tokens', input_tokens + output_tokens)
+            if total_tokens > 0:
+                yield UsageEvent(
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                    node=node_name,
+                )
+
     def _process_human_message(
         self, node_name: str, message: Any
     ) -> Iterator[StreamEvent]:
@@ -233,6 +248,7 @@ class UpdatesHandler:
         tool_name = getattr(message, 'name', None)
         tool_call_id = getattr(message, 'tool_call_id', None)
         content = getattr(message, 'content', None)
+        artifact = getattr(message, 'artifact', None)
 
         # Skip if tool should be skipped
         if tool_name in self._skip_tools:
@@ -242,10 +258,12 @@ class UpdatesHandler:
         is_error, error_message = detect_tool_error(message)
 
         # Try to extract special content
+        # Prefer artifact over content (artifact carries full data from
+        # tools using response_format="content_and_artifact")
         extractor = self._extractors.get(tool_name) if tool_name else None
         if extractor:
             try:
-                extracted = extractor.extract(content)
+                extracted = extractor.extract(artifact if artifact is not None else content)
                 if extracted is not None:
                     yield ToolExtractedEvent(
                         tool_name=tool_name,
