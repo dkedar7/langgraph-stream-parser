@@ -325,14 +325,9 @@ class TestStreamParserErrors:
         assert "Stream error" in error_events[0].error
 
     def test_unsupported_stream_mode(self):
-        parser = StreamParser()
-
-        # Unsupported stream mode yields an ErrorEvent (doesn't raise)
-        events = list(parser.parse(iter([]), stream_mode="values"))
-
-        error_events = [e for e in events if isinstance(e, ErrorEvent)]
-        assert len(error_events) == 1
-        assert "Unsupported stream_mode" in error_events[0].error
+        # Unsupported stream mode raises ValueError at construction time
+        with pytest.raises(ValueError, match="Unsupported stream_mode"):
+            StreamParser(stream_mode="values")
 
 
 class TestStreamParserReset:

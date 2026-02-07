@@ -30,8 +30,8 @@ AIMessage = _create_mock_class(
 
 AIMessageChunk = _create_mock_class(
     "AIMessageChunk",
-    {"content": Any, "id": str, "tool_calls": list},
-    {"id": "chunk_123", "tool_calls": list}
+    {"content": Any, "id": str, "tool_calls": list, "tool_call_chunks": list},
+    {"id": "chunk_123", "tool_calls": list, "tool_call_chunks": list}
 )
 
 ToolMessage = _create_mock_class(
@@ -235,6 +235,35 @@ MULTI_MESSAGE_CONTENT = {
         ]
     }
 }
+
+# --- Dual / Messages mode fixtures ---
+
+MESSAGES_METADATA = {"langgraph_node": "agent", "langgraph_step": 1}
+
+# Messages-mode chunks: (AIMessageChunk, metadata) tuples
+MESSAGES_CHUNK_TOKEN_1 = (AIMessageChunk(content="Hello"), MESSAGES_METADATA)
+MESSAGES_CHUNK_TOKEN_2 = (AIMessageChunk(content=" world"), MESSAGES_METADATA)
+MESSAGES_CHUNK_EMPTY = (AIMessageChunk(content=""), MESSAGES_METADATA)
+MESSAGES_CHUNK_WITH_TOOL_CALL_CHUNKS = (
+    AIMessageChunk(
+        content="",
+        tool_call_chunks=[
+            {"name": "search", "args": "", "id": "call_1", "index": 0}
+        ],
+    ),
+    MESSAGES_METADATA,
+)
+
+# Dual-mode stream chunks: (mode_name, data) tuples
+DUAL_MESSAGES_TOKEN_1 = ("messages", MESSAGES_CHUNK_TOKEN_1)
+DUAL_MESSAGES_TOKEN_2 = ("messages", MESSAGES_CHUNK_TOKEN_2)
+DUAL_MESSAGES_EMPTY = ("messages", MESSAGES_CHUNK_EMPTY)
+DUAL_MESSAGES_TOOL_CHUNK = ("messages", MESSAGES_CHUNK_WITH_TOOL_CALL_CHUNKS)
+
+DUAL_UPDATES_SIMPLE = ("updates", SIMPLE_AI_MESSAGE)
+DUAL_UPDATES_TOOL_CALL = ("updates", AI_MESSAGE_WITH_TOOL_CALLS)
+DUAL_UPDATES_TOOL_RESULT = ("updates", TOOL_MESSAGE_SUCCESS)
+DUAL_UPDATES_INTERRUPT = ("updates", INTERRUPT_WITH_ACTIONS)
 
 # Backward compatibility aliases
 MockAIMessage = AIMessage
