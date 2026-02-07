@@ -8,7 +8,11 @@ AIMessageChunk and metadata contains langgraph_node, langgraph_step, etc.
 from typing import Any, Iterator
 
 from ..events import ContentEvent, StreamEvent
-from ..extractors.messages import extract_message_content, get_message_type_name
+from ..extractors.messages import (
+    extract_message_content,
+    clean_tool_dict_from_content,
+    get_message_type_name,
+)
 
 
 class MessagesHandler:
@@ -47,6 +51,10 @@ class MessagesHandler:
     ) -> Iterator[StreamEvent]:
         """Process an AIMessageChunk for text content only.
 
+        Skips chunks that are tool-call-only (have tool_call_chunks or
+        tool_calls but no meaningful text). Also cleans any tool call
+        dict representations that leak into content strings.
+
         Args:
             chunk: An AIMessageChunk object.
             metadata: Metadata dict with langgraph_node etc.
@@ -54,8 +62,20 @@ class MessagesHandler:
         Yields:
             ContentEvent if the chunk has non-empty text content.
         """
+        # Skip chunks that carry tool call data — tool lifecycle is
+        # handled by the updates handler in dual mode.
+        tool_call_chunks = getattr(chunk, "tool_call_chunks", None)
+        tool_calls = getattr(chunk, "tool_calls", None)
+        if tool_call_chunks or tool_calls:
+            return
+
         content = extract_message_content(chunk)
 
+        if not content:
+            return
+
+        # Clean any stringified tool-call dicts that leak into content
+        content = clean_tool_dict_from_content(content)
         if not content:
             return
 

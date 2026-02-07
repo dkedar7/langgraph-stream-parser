@@ -60,8 +60,12 @@ def clean_tool_dict_from_content(content: str) -> str:
         r"\{'id':\s*'[^']+',\s*'input':\s*\{.*?\},\s*"
         r"'name':\s*'[^']+',\s*'type':\s*'tool_use'\}"
     )
-    content = re.sub(tool_dict_pattern, '', content, flags=re.DOTALL)
-    return content.strip()
+    cleaned = re.sub(tool_dict_pattern, '', content, flags=re.DOTALL)
+    # Only strip if a substitution was made (to preserve leading/trailing
+    # whitespace in normal content tokens like " world")
+    if cleaned != content:
+        return cleaned.strip()
+    return content
 
 
 def extract_tool_calls(message: Any) -> list[dict[str, Any]]:

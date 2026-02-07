@@ -28,10 +28,14 @@ from .fixtures.mocks import (
     MESSAGES_CHUNK_TOKEN_2,
     MESSAGES_CHUNK_EMPTY,
     MESSAGES_CHUNK_WITH_TOOL_CALL_CHUNKS,
+    MESSAGES_CHUNK_TOOL_WITH_CONTENT,
+    MESSAGES_CHUNK_WITH_TOOL_CALLS,
     DUAL_MESSAGES_TOKEN_1,
     DUAL_MESSAGES_TOKEN_2,
     DUAL_MESSAGES_EMPTY,
     DUAL_MESSAGES_TOOL_CHUNK,
+    DUAL_MESSAGES_TOOL_WITH_CONTENT,
+    DUAL_MESSAGES_TOOL_CALLS,
     DUAL_UPDATES_SIMPLE,
     DUAL_UPDATES_TOOL_CALL,
     DUAL_UPDATES_TOOL_RESULT,
@@ -127,6 +131,26 @@ class TestMessagesMode:
         tool_events = [e for e in events if isinstance(e, ToolCallStartEvent)]
         assert len(content_events) == 0
         assert len(tool_events) == 0
+
+    def test_tool_call_chunks_with_content_ignored(self):
+        """AIMessageChunk with tool_call_chunks AND content (stringified tool dict) should emit nothing."""
+        parser = StreamParser(stream_mode="messages")
+        events = list(parser.parse(make_stream([
+            MESSAGES_CHUNK_TOOL_WITH_CONTENT,
+        ])))
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        assert len(content_events) == 0
+
+    def test_tool_calls_list_ignored(self):
+        """AIMessageChunk with tool_calls list should emit nothing."""
+        parser = StreamParser(stream_mode="messages")
+        events = list(parser.parse(make_stream([
+            MESSAGES_CHUNK_WITH_TOOL_CALLS,
+        ])))
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        assert len(content_events) == 0
 
     def test_non_ai_chunk_ignored(self):
         """HumanMessage and ToolMessage chunks produce no events in messages mode."""
@@ -518,6 +542,28 @@ class TestDualModeEdgeCases:
 
         assert len(events) == 1
         assert isinstance(events[0], CompleteEvent)
+
+    def test_tool_call_content_leak_filtered_in_dual_mode(self):
+        """In dual mode, tool call content leaking from messages mode should not produce ContentEvents."""
+        parser = StreamParser(stream_mode=["updates", "messages"])
+        chunks = [
+            DUAL_MESSAGES_TOKEN_1,          # "Hello" — real content
+            DUAL_MESSAGES_TOOL_WITH_CONTENT, # tool dict in content — should be filtered
+            DUAL_UPDATES_TOOL_CALL,          # tool call from updates — should produce ToolCallStartEvent
+            DUAL_MESSAGES_TOKEN_2,           # " world" — real content
+        ]
+        events = list(parser.parse(make_stream(chunks)))
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        tool_events = [e for e in events if isinstance(e, ToolCallStartEvent)]
+
+        # Only the two real content tokens, not the tool dict leak
+        assert len(content_events) == 2
+        assert content_events[0].content == "Hello"
+        assert content_events[1].content == " world"
+        # Tool call comes from updates handler
+        assert len(tool_events) == 1
+        assert tool_events[0].name == "search"
 
     def test_single_updates_mode_unchanged(self):
         """Default updates mode behavior is unchanged."""
