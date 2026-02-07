@@ -40,6 +40,7 @@ class UpdatesHandler:
         track_tool_lifecycle: bool,
         include_state_updates: bool,
         pending_tool_calls: dict[str, ToolCallStartEvent],
+        suppress_content: bool = False,
     ):
         """Initialize the handler.
 
@@ -49,12 +50,16 @@ class UpdatesHandler:
             track_tool_lifecycle: Whether to emit tool lifecycle events.
             include_state_updates: Whether to emit StateUpdateEvents.
             pending_tool_calls: Shared dict tracking pending tool calls.
+            suppress_content: If True, skip ContentEvent generation for
+                AI and human messages. Used in dual mode where the
+                messages handler provides token-level content instead.
         """
         self._extractors = extractors
         self._skip_tools = skip_tools
         self._track_tool_lifecycle = track_tool_lifecycle
         self._include_state_updates = include_state_updates
         self._pending_tool_calls = pending_tool_calls
+        self._suppress_content = suppress_content
 
     def process_chunk(self, chunk: Any) -> Iterator[StreamEvent]:
         """Process a single update chunk.
@@ -174,21 +179,22 @@ class UpdatesHandler:
                 self._pending_tool_calls[tc["id"]] = event
                 yield event
 
-        # Extract content
-        content = extract_message_content(message)
-        content = content.strip() if content else ""
+        # Extract and yield content (unless suppressed for dual mode)
+        if not self._suppress_content:
+            content = extract_message_content(message)
+            content = content.strip() if content else ""
 
-        # Clean tool dict representations from content
-        if content and tool_calls:
-            content = clean_tool_dict_from_content(content)
+            # Clean tool dict representations from content
+            if content and tool_calls:
+                content = clean_tool_dict_from_content(content)
 
-        # Yield content if non-empty
-        if content:
-            yield ContentEvent(
-                content=content,
-                role="assistant",
-                node=node_name,
-            )
+            # Yield content if non-empty
+            if content:
+                yield ContentEvent(
+                    content=content,
+                    role="assistant",
+                    node=node_name,
+                )
 
     def _process_human_message(
         self, node_name: str, message: Any
@@ -200,8 +206,11 @@ class UpdatesHandler:
             message: The HumanMessage.
 
         Yields:
-            ContentEvent with role="human".
+            ContentEvent with role="human" (unless content is suppressed).
         """
+        if self._suppress_content:
+            return
+
         content = extract_message_content(message)
         content = content.strip() if content else ""
 
