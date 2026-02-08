@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.1] - 2026-02-07
+
+### Added
+- Dual stream mode support (`stream_mode=["updates", "messages"]`) with automatic deduplication
+- Auto-detection mode (`stream_mode="auto"`) that inspects the first chunk
+- `MessagesHandler` for token-level content streaming from `stream_mode="messages"`
+- `UsageEvent` for token usage metadata from AIMessage `usage_metadata`
+- `DisplayInlineExtractor` for extracting inline display artifacts
+- Event serialization helpers (`InterruptEvent.build_decisions()`, `InterruptEvent.create_resume()`)
+
+### Changed
+- `stream_mode` is now a constructor parameter on `StreamParser` (moved from `parse()`/`aparse()`)
+- `UpdatesHandler` accepts `suppress_content` flag for dual-mode deduplication
+
 ## [0.1.0] - 2026-02-01
 
 ### Initial Release
