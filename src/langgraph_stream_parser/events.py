@@ -25,6 +25,15 @@ class ContentEvent:
     node: str | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict for web APIs."""
+        return {
+            "type": "content",
+            "content": self.content,
+            "role": self.role,
+            "node": self.node,
+        }
+
 
 @dataclass
 class ToolCallStartEvent:
@@ -45,6 +54,16 @@ class ToolCallStartEvent:
     args: dict[str, Any]
     node: str | None = None
     timestamp: datetime = field(default_factory=datetime.now)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict for web APIs."""
+        return {
+            "type": "tool_start",
+            "id": self.id,
+            "name": self.name,
+            "args": self.args,
+            "node": self.node,
+        }
 
 
 @dataclass
@@ -71,6 +90,25 @@ class ToolCallEndEvent:
     duration_ms: float | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
+    def to_dict(self, max_result_len: int = 500) -> dict[str, Any]:
+        """Convert to JSON-serializable dict for web APIs.
+
+        Args:
+            max_result_len: Maximum length for result string (truncated if longer).
+        """
+        result_str = str(self.result)
+        if len(result_str) > max_result_len:
+            result_str = result_str[:max_result_len] + "..."
+        return {
+            "type": "tool_end",
+            "id": self.id,
+            "name": self.name,
+            "result": result_str,
+            "status": self.status,
+            "error_message": self.error_message,
+            "duration_ms": self.duration_ms,
+        }
+
 
 @dataclass
 class ToolExtractedEvent:
@@ -91,6 +129,15 @@ class ToolExtractedEvent:
     extracted_type: str
     data: Any
     timestamp: datetime = field(default_factory=datetime.now)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict for web APIs."""
+        return {
+            "type": "extraction",
+            "tool_name": self.tool_name,
+            "extracted_type": self.extracted_type,
+            "data": self.data,
+        }
 
 
 @dataclass
@@ -119,6 +166,92 @@ class InterruptEvent:
         """Check if this interrupt has action requests needing approval."""
         return len(self.action_requests) > 0
 
+    @property
+    def allowed_decisions(self) -> set[str]:
+        """Get the set of allowed decision types from review configs."""
+        allowed = set()
+        for config in self.review_configs:
+            allowed.update(config.get("allowed_decisions", []))
+        if not allowed:
+            allowed = {"approve", "reject"}
+        return allowed
+
+    def build_decisions(
+        self,
+        decision_type: str,
+        args_modifier: Any = None,
+    ) -> list[dict[str, Any]]:
+        """Build decision list for resuming from this interrupt.
+
+        Args:
+            decision_type: The decision type (e.g., "approve", "reject", "edit").
+            args_modifier: Optional function to modify args for "edit" decisions.
+                Takes original args dict and returns modified args dict.
+
+        Returns:
+            List of decision dicts ready for create_resume_input().
+
+        Example:
+            # Approve all actions
+            decisions = interrupt.build_decisions("approve")
+            resume_input = create_resume_input(decisions=decisions)
+
+            # Edit args before approval
+            def modify(args):
+                args["safe_mode"] = True
+                return args
+            decisions = interrupt.build_decisions("edit", args_modifier=modify)
+        """
+        decisions = []
+        for action in self.action_requests:
+            decision: dict[str, Any] = {"type": decision_type}
+
+            if decision_type == "edit" and args_modifier is not None:
+                original_args = action.get("args", {})
+                decision["args"] = args_modifier(original_args)
+
+            decisions.append(decision)
+
+        return decisions
+
+    def create_resume(
+        self,
+        decision_type: str,
+        args_modifier: Any = None,
+    ) -> Any:
+        """Create resume input to continue from this interrupt.
+
+        This is a convenience method that combines build_decisions() and
+        create_resume_input() into a single call.
+
+        Args:
+            decision_type: The decision type (e.g., "approve", "reject", "edit").
+            args_modifier: Optional function to modify args for "edit" decisions.
+
+        Returns:
+            A LangGraph Command object ready to pass to graph.stream().
+
+        Example:
+            # Approve and resume in one call
+            resume_input = interrupt.create_resume("approve")
+            for event in parser.parse(graph.stream(resume_input, config=config)):
+                handle_event(event)
+        """
+        # Import here to avoid circular dependency
+        from .resume import create_resume_input
+
+        decisions = self.build_decisions(decision_type, args_modifier)
+        return create_resume_input(decisions=decisions)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict for web APIs."""
+        return {
+            "type": "interrupt",
+            "action_requests": self.action_requests,
+            "review_configs": self.review_configs,
+            "allowed_decisions": list(self.allowed_decisions),
+        }
+
 
 @dataclass
 class StateUpdateEvent:
@@ -138,6 +271,47 @@ class StateUpdateEvent:
     value: Any
     timestamp: datetime = field(default_factory=datetime.now)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict for web APIs."""
+        return {
+            "type": "state_update",
+            "node": self.node,
+            "key": self.key,
+            "value": self.value,
+        }
+
+
+@dataclass
+class UsageEvent:
+    """Token usage metadata from a model invocation.
+
+    Emitted when an AIMessage contains usage_metadata with token counts.
+    These are per-invocation counts (not cumulative); consumers should
+    accumulate them if a running total is desired.
+
+    Attributes:
+        input_tokens: Number of input (prompt) tokens.
+        output_tokens: Number of output (completion) tokens.
+        total_tokens: Sum of input and output tokens.
+        node: The name of the graph node that produced this usage.
+        timestamp: When the event was created.
+    """
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    node: str | None = None
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict for web APIs."""
+        return {
+            "type": "usage",
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "total_tokens": self.total_tokens,
+            "node": self.node,
+        }
+
 
 @dataclass
 class CompleteEvent:
@@ -149,6 +323,10 @@ class CompleteEvent:
         timestamp: When the stream completed.
     """
     timestamp: datetime = field(default_factory=datetime.now)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict for web APIs."""
+        return {"type": "complete"}
 
 
 @dataclass
@@ -168,6 +346,34 @@ class ErrorEvent:
     exception: Exception | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict for web APIs."""
+        return {
+            "type": "error",
+            "error": self.error,
+        }
+
+
+def event_to_dict(event: "StreamEvent") -> dict[str, Any]:
+    """Convert any StreamEvent to a JSON-serializable dict.
+
+    This is a convenience function for web APIs that need to serialize
+    events to JSON for transmission over WebSockets, HTTP responses, etc.
+
+    Args:
+        event: Any StreamEvent instance.
+
+    Returns:
+        A dict with a "type" key and event-specific fields.
+
+    Example:
+        for event in parser.parse(stream):
+            await websocket.send_json(event_to_dict(event))
+    """
+    if hasattr(event, "to_dict"):
+        return event.to_dict()
+    return {"type": "unknown", "event": str(event)}
+
 
 # Union type for all events - useful for type hints
 StreamEvent = Union[
@@ -177,6 +383,7 @@ StreamEvent = Union[
     ToolExtractedEvent,
     InterruptEvent,
     StateUpdateEvent,
+    UsageEvent,
     CompleteEvent,
     ErrorEvent,
 ]

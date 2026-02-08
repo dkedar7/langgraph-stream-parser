@@ -156,7 +156,7 @@ class BaseAdapter(ABC):
         *,
         config: dict[str, Any] | None = None,
         parser: StreamParser | None = None,
-        stream_mode: str = "updates",
+        stream_mode: str | list[str] = "updates",
         **stream_kwargs: Any,
     ) -> None:
         """Run a LangGraph agent with live display and interrupt handling.
@@ -173,8 +173,9 @@ class BaseAdapter(ABC):
             graph: The LangGraph graph/agent to run.
             input_data: Initial input for the agent.
             config: LangGraph config dict (must include thread_id for resumption).
-            parser: Optional pre-configured StreamParser.
-            stream_mode: The stream mode to use.
+            parser: Optional pre-configured StreamParser with stream_mode set.
+            stream_mode: The stream mode to use. Passed to both graph.stream()
+                and StreamParser (when parser is auto-created).
             **stream_kwargs: Additional arguments passed to graph.stream()
                 (e.g., interrupt_before, interrupt_after, debug).
 
@@ -190,7 +191,7 @@ class BaseAdapter(ABC):
         self.reset()
 
         if parser is None:
-            parser = StreamParser()
+            parser = StreamParser(stream_mode=stream_mode)
 
         current_input = input_data
 
@@ -203,7 +204,7 @@ class BaseAdapter(ABC):
                 **stream_kwargs,
             )
 
-            for event in parser.parse(stream, stream_mode=stream_mode):
+            for event in parser.parse(stream):
                 self.update(event)
 
                 # Check for interrupt

@@ -37,12 +37,14 @@ from .events import (
     ToolExtractedEvent,
     InterruptEvent,
     StateUpdateEvent,
+    UsageEvent,
     CompleteEvent,
     ErrorEvent,
     StreamEvent,
+    event_to_dict,
 )
 from .extractors.base import ToolExtractor
-from .extractors.builtins import ThinkToolExtractor, TodoExtractor
+from .extractors.builtins import ThinkToolExtractor, TodoExtractor, DisplayInlineExtractor
 from .resume import create_resume_input, prepare_agent_input
 from .compat import (
     stream_graph_updates,
@@ -63,6 +65,7 @@ __all__ = [
     "ToolExtractedEvent",
     "InterruptEvent",
     "StateUpdateEvent",
+    "UsageEvent",
     "CompleteEvent",
     "ErrorEvent",
     "StreamEvent",
@@ -70,9 +73,12 @@ __all__ = [
     "ToolExtractor",
     "ThinkToolExtractor",
     "TodoExtractor",
+    "DisplayInlineExtractor",
     # Resume utilities
     "create_resume_input",
     "prepare_agent_input",
+    # Serialization
+    "event_to_dict",
     # Legacy/compat functions
     "stream_graph_updates",
     "astream_graph_updates",

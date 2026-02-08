@@ -106,7 +106,7 @@ def stream_graph_updates(
     agent: Any,
     input_data: Any,
     config: dict[str, Any] | None = None,
-    stream_mode: str = "updates",
+    stream_mode: str | list[str] = "updates",
 ) -> Iterator[dict[str, Any]]:
     """Stream updates from a LangGraph agent.
 
@@ -139,6 +139,7 @@ def stream_graph_updates(
                 break
     """
     parser = StreamParser(
+        stream_mode=stream_mode,
         track_tool_lifecycle=True,
         skip_tools=["think_tool", "write_todos"],
     )
@@ -146,7 +147,7 @@ def stream_graph_updates(
     try:
         stream = agent.stream(input_data, config=config, stream_mode=stream_mode)
 
-        for event in parser.parse(stream, stream_mode=stream_mode):
+        for event in parser.parse(stream):
             result = _event_to_dict(event)
             if result is not None:
                 yield result
@@ -162,7 +163,7 @@ async def astream_graph_updates(
     agent: Any,
     input_data: Any,
     config: dict[str, Any] | None = None,
-    stream_mode: str = "updates",
+    stream_mode: str | list[str] = "updates",
 ) -> AsyncIterator[dict[str, Any]]:
     """Async version of stream_graph_updates.
 
@@ -176,6 +177,7 @@ async def astream_graph_updates(
         Same format as stream_graph_updates.
     """
     parser = StreamParser(
+        stream_mode=stream_mode,
         track_tool_lifecycle=True,
         skip_tools=["think_tool", "write_todos"],
     )
@@ -183,7 +185,7 @@ async def astream_graph_updates(
     try:
         stream = agent.astream(input_data, config=config, stream_mode=stream_mode)
 
-        async for event in parser.aparse(stream, stream_mode=stream_mode):
+        async for event in parser.aparse(stream):
             result = _event_to_dict(event)
             if result is not None:
                 yield result

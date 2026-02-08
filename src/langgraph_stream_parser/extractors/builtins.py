@@ -125,3 +125,42 @@ class TodoExtractor:
             todos = content
 
         return todos if isinstance(todos, list) else None
+
+
+class DisplayInlineExtractor:
+    """Extractor for display_inline tool output.
+
+    The display_inline tool renders rich content (images, tables, charts,
+    HTML, JSON) directly in the chat timeline. The tool returns a JSON
+    string with display metadata that this extractor parses.
+
+    Handles formats:
+        - JSON string with display_type, data, title, status keys
+        - Dict with the same keys (if already parsed)
+    """
+
+    tool_name = "display_inline"
+    extracted_type = "display_inline"
+
+    def extract(self, content: Any) -> dict[str, Any] | None:
+        """Extract display data from display_inline content.
+
+        Args:
+            content: The JSON string or dict from display_inline.
+
+        Returns:
+            Dict with display_type, data, title, status, etc., or None.
+        """
+        if isinstance(content, str):
+            try:
+                parsed = json.loads(content)
+                if isinstance(parsed, dict) and "display_type" in parsed:
+                    return parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+            return None
+
+        if isinstance(content, dict) and "display_type" in content:
+            return content
+
+        return None

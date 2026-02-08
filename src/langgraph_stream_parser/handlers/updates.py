@@ -14,6 +14,7 @@ from ..events import (
     ToolCallEndEvent,
     ToolCallStartEvent,
     ToolExtractedEvent,
+    UsageEvent,
 )
 from ..extractors.base import ToolExtractor
 from ..extractors.interrupts import process_interrupt
@@ -40,6 +41,7 @@ class UpdatesHandler:
         track_tool_lifecycle: bool,
         include_state_updates: bool,
         pending_tool_calls: dict[str, ToolCallStartEvent],
+        suppress_content: bool = False,
     ):
         """Initialize the handler.
 
@@ -49,12 +51,16 @@ class UpdatesHandler:
             track_tool_lifecycle: Whether to emit tool lifecycle events.
             include_state_updates: Whether to emit StateUpdateEvents.
             pending_tool_calls: Shared dict tracking pending tool calls.
+            suppress_content: If True, skip ContentEvent generation for
+                AI and human messages. Used in dual mode where the
+                messages handler provides token-level content instead.
         """
         self._extractors = extractors
         self._skip_tools = skip_tools
         self._track_tool_lifecycle = track_tool_lifecycle
         self._include_state_updates = include_state_updates
         self._pending_tool_calls = pending_tool_calls
+        self._suppress_content = suppress_content
 
     def process_chunk(self, chunk: Any) -> Iterator[StreamEvent]:
         """Process a single update chunk.
@@ -174,21 +180,36 @@ class UpdatesHandler:
                 self._pending_tool_calls[tc["id"]] = event
                 yield event
 
-        # Extract content
-        content = extract_message_content(message)
-        content = content.strip() if content else ""
+        # Extract and yield content (unless suppressed for dual mode)
+        if not self._suppress_content:
+            content = extract_message_content(message)
+            content = content.strip() if content else ""
 
-        # Clean tool dict representations from content
-        if content and tool_calls:
-            content = clean_tool_dict_from_content(content)
+            # Clean tool dict representations from content
+            if content and tool_calls:
+                content = clean_tool_dict_from_content(content)
 
-        # Yield content if non-empty
-        if content:
-            yield ContentEvent(
-                content=content,
-                role="assistant",
-                node=node_name,
-            )
+            # Yield content if non-empty
+            if content:
+                yield ContentEvent(
+                    content=content,
+                    role="assistant",
+                    node=node_name,
+                )
+
+        # Extract token usage if present
+        usage = getattr(message, 'usage_metadata', None)
+        if usage and isinstance(usage, dict):
+            input_tokens = usage.get('input_tokens', 0)
+            output_tokens = usage.get('output_tokens', 0)
+            total_tokens = usage.get('total_tokens', input_tokens + output_tokens)
+            if total_tokens > 0:
+                yield UsageEvent(
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                    node=node_name,
+                )
 
     def _process_human_message(
         self, node_name: str, message: Any
@@ -200,8 +221,11 @@ class UpdatesHandler:
             message: The HumanMessage.
 
         Yields:
-            ContentEvent with role="human".
+            ContentEvent with role="human" (unless content is suppressed).
         """
+        if self._suppress_content:
+            return
+
         content = extract_message_content(message)
         content = content.strip() if content else ""
 
@@ -224,6 +248,7 @@ class UpdatesHandler:
         tool_name = getattr(message, 'name', None)
         tool_call_id = getattr(message, 'tool_call_id', None)
         content = getattr(message, 'content', None)
+        artifact = getattr(message, 'artifact', None)
 
         # Skip if tool should be skipped
         if tool_name in self._skip_tools:
@@ -233,10 +258,12 @@ class UpdatesHandler:
         is_error, error_message = detect_tool_error(message)
 
         # Try to extract special content
+        # Prefer artifact over content (artifact carries full data from
+        # tools using response_format="content_and_artifact")
         extractor = self._extractors.get(tool_name) if tool_name else None
         if extractor:
             try:
-                extracted = extractor.extract(content)
+                extracted = extractor.extract(artifact if artifact is not None else content)
                 if extracted is not None:
                     yield ToolExtractedEvent(
                         tool_name=tool_name,

@@ -51,6 +51,8 @@ for event in parser.parse(graph.stream(input_data, stream_mode="updates")):
 | `CompleteEvent` | Stream finished successfully |
 | `ErrorEvent` | Error during streaming |
 
+All events have a `to_dict()` method for JSON serialization. Use `event_to_dict(event)` for a convenient conversion function.
+
 ## Usage Examples
 
 ### Basic Parsing
@@ -100,7 +102,7 @@ for event in parser.parse(stream):
 ### Handling Interrupts
 
 ```python
-from langgraph_stream_parser import StreamParser, create_resume_input
+from langgraph_stream_parser import StreamParser
 from langgraph_stream_parser.events import InterruptEvent
 
 parser = StreamParser()
@@ -113,13 +115,12 @@ for event in parser.parse(graph.stream(input_data, config=config)):
             print(f"Tool: {action['tool']}")
             print(f"Args: {action['args']}")
 
-        # Get user decision
-        decision = input("Approve? (y/n): ")
+        # Check allowed decisions
+        print(f"Allowed: {event.allowed_decisions}")
 
-        # Resume
-        resume_input = create_resume_input(
-            decisions=[{"type": "approve" if decision == "y" else "reject"}]
-        )
+        # Get user decision and resume
+        decision = "approve" if input("Approve? (y/n): ") == "y" else "reject"
+        resume_input = event.create_resume(decision)
 
         for resume_event in parser.parse(graph.stream(resume_input, config=config)):
             handle_event(resume_event)
@@ -279,6 +280,22 @@ The package includes extractors for common LangGraph tools:
 
 - **ThinkToolExtractor**: Extracts reflections from `think_tool`
 - **TodoExtractor**: Extracts todo lists from `write_todos`
+
+## Examples
+
+### FastAPI WebSocket Streaming
+
+See [examples/fastapi_websocket.py](examples/fastapi_websocket.py) for a complete example of streaming LangGraph events to a web client via WebSockets.
+
+```bash
+# Install dependencies
+pip install fastapi uvicorn websockets
+
+# Run the example
+uvicorn examples.fastapi_websocket:app --reload
+
+# Open http://localhost:8000 in your browser
+```
 
 ## Development
 

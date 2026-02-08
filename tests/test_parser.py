@@ -10,6 +10,7 @@ from langgraph_stream_parser import (
     ToolExtractedEvent,
     InterruptEvent,
     StateUpdateEvent,
+    UsageEvent,
     CompleteEvent,
     ErrorEvent,
 )
@@ -18,6 +19,7 @@ from .fixtures.mocks import (
     SIMPLE_AI_MESSAGE,
     AI_MESSAGE_WITH_TOOL_CALLS,
     AI_MESSAGE_WITH_CONTENT_AND_TOOLS,
+    AI_MESSAGE_WITH_USAGE,
     TOOL_MESSAGE_SUCCESS,
     TOOL_MESSAGE_ERROR,
     TOOL_MESSAGE_ERROR_PREFIX,
@@ -25,6 +27,8 @@ from .fixtures.mocks import (
     THINK_TOOL_STRING_CONTENT,
     WRITE_TODOS_MESSAGE,
     WRITE_TODOS_EMBEDDED,
+    DISPLAY_INLINE_ARTIFACT_MESSAGE,
+    DISPLAY_INLINE_CONTENT_MESSAGE,
     INTERRUPT_SIMPLE,
     INTERRUPT_WITH_ACTIONS,
     INTERRUPT_MULTIPLE_ACTIONS,
@@ -325,14 +329,80 @@ class TestStreamParserErrors:
         assert "Stream error" in error_events[0].error
 
     def test_unsupported_stream_mode(self):
+        # Unsupported stream mode raises ValueError at construction time
+        with pytest.raises(ValueError, match="Unsupported stream_mode"):
+            StreamParser(stream_mode="values")
+
+
+class TestStreamParserUsage:
+    def test_usage_event_emitted(self):
         parser = StreamParser()
+        stream = make_stream([AI_MESSAGE_WITH_USAGE])
 
-        # Unsupported stream mode yields an ErrorEvent (doesn't raise)
-        events = list(parser.parse(iter([]), stream_mode="values"))
+        events = list(parser.parse(stream))
 
-        error_events = [e for e in events if isinstance(e, ErrorEvent)]
-        assert len(error_events) == 1
-        assert "Unsupported stream_mode" in error_events[0].error
+        usage_events = [e for e in events if isinstance(e, UsageEvent)]
+        assert len(usage_events) == 1
+        assert usage_events[0].input_tokens == 150
+        assert usage_events[0].output_tokens == 42
+        assert usage_events[0].total_tokens == 192
+        assert usage_events[0].node == "agent"
+
+    def test_no_usage_event_without_metadata(self):
+        parser = StreamParser()
+        stream = make_stream([SIMPLE_AI_MESSAGE])
+
+        events = list(parser.parse(stream))
+
+        usage_events = [e for e in events if isinstance(e, UsageEvent)]
+        assert len(usage_events) == 0
+
+    def test_usage_with_content(self):
+        """Usage event should be emitted alongside content."""
+        parser = StreamParser()
+        stream = make_stream([AI_MESSAGE_WITH_USAGE])
+
+        events = list(parser.parse(stream))
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        usage_events = [e for e in events if isinstance(e, UsageEvent)]
+        assert len(content_events) == 1
+        assert content_events[0].content == "Done."
+        assert len(usage_events) == 1
+
+
+class TestStreamParserDisplayInline:
+    def test_artifact_extraction(self):
+        """When ToolMessage has artifact, extractor receives the artifact dict."""
+        parser = StreamParser()
+        events = list(parser.parse(make_stream([DISPLAY_INLINE_ARTIFACT_MESSAGE])))
+
+        extracted = [e for e in events if isinstance(e, ToolExtractedEvent)]
+        assert len(extracted) == 1
+        assert extracted[0].tool_name == "display_inline"
+        assert extracted[0].extracted_type == "display_inline"
+        assert extracted[0].data["display_type"] == "dataframe"
+        assert extracted[0].data["title"] == "Sales Data"
+
+    def test_artifact_extraction_tool_end_has_stub(self):
+        """ToolCallEndEvent.result should be the stub content, not the artifact."""
+        parser = StreamParser()
+        events = list(parser.parse(make_stream([DISPLAY_INLINE_ARTIFACT_MESSAGE])))
+
+        end_events = [e for e in events if isinstance(e, ToolCallEndEvent)]
+        assert len(end_events) == 1
+        # The result is the ToolMessage.content (the stub), not the artifact
+        assert end_events[0].result == "Displayed dataframe inline: Sales Data"
+
+    def test_content_fallback_extraction(self):
+        """When no artifact, extractor falls back to parsing content as JSON."""
+        parser = StreamParser()
+        events = list(parser.parse(make_stream([DISPLAY_INLINE_CONTENT_MESSAGE])))
+
+        extracted = [e for e in events if isinstance(e, ToolExtractedEvent)]
+        assert len(extracted) == 1
+        assert extracted[0].data["display_type"] == "image"
+        assert extracted[0].data["title"] == "Chart"
 
 
 class TestStreamParserReset:
