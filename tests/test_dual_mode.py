@@ -40,6 +40,17 @@ from .fixtures.mocks import (
     DUAL_UPDATES_TOOL_CALL,
     DUAL_UPDATES_TOOL_RESULT,
     DUAL_UPDATES_INTERRUPT,
+    NAMESPACE_PARENT,
+    NAMESPACE_CHILD,
+    SUBGRAPH_SINGLE_PARENT,
+    SUBGRAPH_SINGLE_CHILD,
+    SUBGRAPH_SINGLE_CHILD_TOOL,
+    SUBGRAPH_MULTI_PARENT_MSG,
+    SUBGRAPH_MULTI_CHILD_MSG,
+    SUBGRAPH_MULTI_PARENT_UPD,
+    SUBGRAPH_MULTI_CHILD_UPD,
+    SUBGRAPH_MULTI_CHILD_TOOL_RESULT,
+    SUBGRAPH_MULTI_CHILD_INTERRUPT,
 )
 
 
@@ -574,3 +585,224 @@ class TestDualModeEdgeCases:
         assert len(content_events) == 1
         assert content_events[0].content == "Hello, how can I help?"
         assert isinstance(events[-1], CompleteEvent)
+
+
+# ── Subgraph (subgraphs=True) support ────────────────────────────────
+
+
+class TestSubgraphSingleMode:
+    """Single stream mode with subgraphs=True: chunks are (namespace, data)."""
+
+    def test_parent_chunk_processed(self):
+        parser = StreamParser(stream_mode="updates")
+        events = list(parser.parse(make_stream([SUBGRAPH_SINGLE_PARENT])))
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        assert len(content_events) == 1
+        assert content_events[0].content == "Hello, how can I help?"
+
+    def test_child_chunk_processed(self):
+        parser = StreamParser(stream_mode="updates")
+        events = list(parser.parse(make_stream([SUBGRAPH_SINGLE_CHILD])))
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        assert len(content_events) == 1
+        assert "Subgraph response" in content_events[0].content
+
+    def test_mixed_parent_and_child(self):
+        parser = StreamParser(stream_mode="updates")
+        events = list(parser.parse(make_stream([
+            SUBGRAPH_SINGLE_PARENT,
+            SUBGRAPH_SINGLE_CHILD,
+        ])))
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        assert len(content_events) == 2
+        assert isinstance(events[-1], CompleteEvent)
+
+    def test_child_tool_calls(self):
+        parser = StreamParser(stream_mode="updates")
+        events = list(parser.parse(make_stream([SUBGRAPH_SINGLE_CHILD_TOOL])))
+
+        tool_starts = [e for e in events if isinstance(e, ToolCallStartEvent)]
+        assert len(tool_starts) == 1
+        assert tool_starts[0].name == "search"
+
+    def test_parse_chunk_single_subgraph(self):
+        parser = StreamParser(stream_mode="updates")
+        events = parser.parse_chunk(SUBGRAPH_SINGLE_CHILD)
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        assert len(content_events) == 1
+
+    def test_regular_dict_still_works(self):
+        """Plain dict chunks (no subgraphs) still work in single mode."""
+        parser = StreamParser(stream_mode="updates")
+        events = list(parser.parse(make_stream([SIMPLE_AI_MESSAGE])))
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        assert len(content_events) == 1
+
+
+class TestSubgraphMultiMode:
+    """Multi stream mode with subgraphs=True: chunks are (namespace, mode, data)."""
+
+    def test_parent_messages_processed(self):
+        parser = StreamParser(stream_mode=["updates", "messages"])
+        events = list(parser.parse(make_stream([SUBGRAPH_MULTI_PARENT_MSG])))
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        assert len(content_events) == 1
+        assert content_events[0].content == "Hello"
+
+    def test_child_messages_processed(self):
+        parser = StreamParser(stream_mode=["updates", "messages"])
+        events = list(parser.parse(make_stream([SUBGRAPH_MULTI_CHILD_MSG])))
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        assert len(content_events) == 1
+        assert content_events[0].content == "Sub token"
+
+    def test_child_updates_suppresses_content(self):
+        """In dual mode, updates from subgraph still suppress ContentEvent."""
+        parser = StreamParser(stream_mode=["updates", "messages"])
+        events = list(parser.parse(make_stream([SUBGRAPH_MULTI_PARENT_UPD])))
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        assert len(content_events) == 0
+
+    def test_child_tool_lifecycle(self):
+        parser = StreamParser(stream_mode=["updates", "messages"])
+        events = list(parser.parse(make_stream([
+            SUBGRAPH_MULTI_CHILD_UPD,
+            SUBGRAPH_MULTI_CHILD_TOOL_RESULT,
+        ])))
+
+        tool_starts = [e for e in events if isinstance(e, ToolCallStartEvent)]
+        tool_ends = [e for e in events if isinstance(e, ToolCallEndEvent)]
+        assert len(tool_starts) == 1
+        assert tool_starts[0].name == "search"
+        assert len(tool_ends) == 1
+        assert tool_ends[0].status == "success"
+
+    def test_child_interrupt(self):
+        parser = StreamParser(stream_mode=["updates", "messages"])
+        events = list(parser.parse(make_stream([SUBGRAPH_MULTI_CHILD_INTERRUPT])))
+
+        interrupt_events = [e for e in events if isinstance(e, InterruptEvent)]
+        assert len(interrupt_events) == 1
+
+    def test_mixed_parent_child_interleaved(self):
+        """Full conversation with parent and child subgraph chunks interleaved."""
+        parser = StreamParser(stream_mode=["updates", "messages"])
+        chunks = [
+            SUBGRAPH_MULTI_PARENT_MSG,   # parent token
+            SUBGRAPH_MULTI_CHILD_MSG,    # child token
+            SUBGRAPH_MULTI_CHILD_UPD,    # child tool call (updates)
+            SUBGRAPH_MULTI_CHILD_TOOL_RESULT,  # child tool result
+        ]
+        events = list(parser.parse(make_stream(chunks)))
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        tool_starts = [e for e in events if isinstance(e, ToolCallStartEvent)]
+        tool_ends = [e for e in events if isinstance(e, ToolCallEndEvent)]
+
+        assert len(content_events) == 2  # parent + child tokens
+        assert len(tool_starts) == 1
+        assert len(tool_ends) == 1
+        assert isinstance(events[-1], CompleteEvent)
+
+    def test_parse_chunk_multi_subgraph(self):
+        parser = StreamParser(stream_mode=["updates", "messages"])
+        events = parser.parse_chunk(SUBGRAPH_MULTI_CHILD_MSG)
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        assert len(content_events) == 1
+        assert content_events[0].content == "Sub token"
+
+    def test_regular_dual_chunks_still_work(self):
+        """Regular 2-tuple chunks still work alongside subgraph 3-tuples."""
+        parser = StreamParser(stream_mode=["updates", "messages"])
+        chunks = [
+            DUAL_MESSAGES_TOKEN_1,       # regular 2-tuple
+            SUBGRAPH_MULTI_CHILD_MSG,    # subgraph 3-tuple
+        ]
+        events = list(parser.parse(make_stream(chunks)))
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        assert len(content_events) == 2
+
+
+class TestSubgraphAutoDetect:
+    """Auto-detection with subgraph formats."""
+
+    def test_auto_detect_subgraph_multi(self):
+        """Auto mode detects subgraph 3-tuple as multi mode."""
+        parser = StreamParser(stream_mode="auto")
+        events = list(parser.parse(make_stream([
+            SUBGRAPH_MULTI_PARENT_MSG,
+            SUBGRAPH_MULTI_CHILD_MSG,
+        ])))
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        assert len(content_events) == 2
+
+    def test_auto_detect_subgraph_single(self):
+        """Auto mode detects subgraph single (namespace, dict) as updates."""
+        parser = StreamParser(stream_mode="auto")
+        events = list(parser.parse(make_stream([SUBGRAPH_SINGLE_PARENT])))
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        assert len(content_events) == 1
+
+    def test_auto_detect_subgraph_preserves_first_chunk(self):
+        """Auto mode doesn't lose the first subgraph chunk."""
+        parser = StreamParser(stream_mode="auto")
+        events = list(parser.parse(make_stream([SUBGRAPH_MULTI_CHILD_MSG])))
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        assert len(content_events) == 1
+        assert content_events[0].content == "Sub token"
+
+
+class TestSubgraphAsync:
+    @pytest.mark.asyncio
+    async def test_aparse_subgraph_multi(self):
+        parser = StreamParser(stream_mode=["updates", "messages"])
+        events = []
+        async for event in parser.aparse(make_async_stream([
+            SUBGRAPH_MULTI_PARENT_MSG,
+            SUBGRAPH_MULTI_CHILD_MSG,
+            SUBGRAPH_MULTI_CHILD_UPD,
+        ])):
+            events.append(event)
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        tool_starts = [e for e in events if isinstance(e, ToolCallStartEvent)]
+        assert len(content_events) == 2
+        assert len(tool_starts) == 1
+
+    @pytest.mark.asyncio
+    async def test_aparse_subgraph_single(self):
+        parser = StreamParser(stream_mode="updates")
+        events = []
+        async for event in parser.aparse(make_async_stream([
+            SUBGRAPH_SINGLE_PARENT,
+            SUBGRAPH_SINGLE_CHILD,
+        ])):
+            events.append(event)
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        assert len(content_events) == 2
+
+    @pytest.mark.asyncio
+    async def test_aparse_auto_detect_subgraph_multi(self):
+        parser = StreamParser(stream_mode="auto")
+        events = []
+        async for event in parser.aparse(make_async_stream([
+            SUBGRAPH_MULTI_PARENT_MSG,
+        ])):
+            events.append(event)
+
+        content_events = [e for e in events if isinstance(e, ContentEvent)]
+        assert len(content_events) == 1
