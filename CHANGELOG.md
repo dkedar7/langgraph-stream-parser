@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2] - 2026-02-08
+
+### Added
+- Subgraph namespace stripping for `subgraphs=True` streams
+- Automatic handling of single-mode `(namespace, data)` and multi-mode `(namespace, mode, data)` chunk formats
+- All parent and subgraph chunks processed uniformly with namespace stripped
+
 ## [0.1.1] - 2026-02-07
 
 ### Added
