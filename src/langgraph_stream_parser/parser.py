@@ -21,13 +21,62 @@ _VALID_MODES = {"updates", "messages"}
 
 
 def _is_multi_mode(chunk: Any) -> bool:
-    """Check if a chunk is from multi-mode streaming (a (str, data) tuple)."""
+    """Check if a chunk is from multi-mode streaming.
+
+    Handles both regular and subgraph formats:
+    - Regular: (mode_name: str, data)
+    - Subgraph: (namespace: tuple, mode_name: str, data)
+    """
+    if not isinstance(chunk, tuple):
+        return False
+    if len(chunk) == 2 and isinstance(chunk[0], str) and chunk[0] in _VALID_MODES:
+        return True
+    if len(chunk) == 3 and isinstance(chunk[0], tuple) and isinstance(chunk[1], str) and chunk[1] in _VALID_MODES:
+        return True
+    return False
+
+
+def _is_subgraph_single_mode(chunk: Any) -> bool:
+    """Check if a chunk is from single-mode streaming with subgraphs=True.
+
+    Format: (namespace: tuple, data: dict)
+    """
     return (
         isinstance(chunk, tuple)
         and len(chunk) == 2
-        and isinstance(chunk[0], str)
-        and chunk[0] in _VALID_MODES
+        and isinstance(chunk[0], tuple)
+        and isinstance(chunk[1], dict)
     )
+
+
+def _unwrap_multi_chunk(chunk: tuple) -> tuple[str, Any]:
+    """Unwrap a multi-mode chunk, stripping namespace if present.
+
+    Args:
+        chunk: Either (mode_name, data) or (namespace, mode_name, data).
+
+    Returns:
+        (mode_name, data) with namespace stripped.
+    """
+    if len(chunk) == 3 and isinstance(chunk[0], tuple):
+        # Subgraph format: (namespace, mode_name, data)
+        return chunk[1], chunk[2]
+    # Regular format: (mode_name, data)
+    return chunk[0], chunk[1]
+
+
+def _unwrap_single_chunk(chunk: Any) -> Any:
+    """Unwrap a single-mode chunk, stripping namespace if present.
+
+    Args:
+        chunk: Either a plain dict or (namespace, data).
+
+    Returns:
+        The data with namespace stripped.
+    """
+    if _is_subgraph_single_mode(chunk):
+        return chunk[1]
+    return chunk
 
 
 class StreamParser:
@@ -143,6 +192,9 @@ class StreamParser:
         This is the main entry point for parsing. It iterates over the
         stream, processes each chunk, and yields typed events.
 
+        Supports subgraph streaming (``subgraphs=True``): namespace tuples
+        are stripped automatically and all chunks are processed uniformly.
+
         Args:
             stream: Iterator from graph.stream().
 
@@ -165,7 +217,7 @@ class StreamParser:
             else:
                 handler = self._create_handler_for_mode(effective_mode)
                 for chunk in stream:
-                    yield from handler.process_chunk(chunk)
+                    yield from handler.process_chunk(_unwrap_single_chunk(chunk))
 
             yield CompleteEvent()
 
@@ -203,7 +255,9 @@ class StreamParser:
             else:
                 handler = self._create_handler_for_mode(effective_mode)
                 async for chunk in stream:
-                    for event in handler.process_chunk(chunk):
+                    for event in handler.process_chunk(
+                        _unwrap_single_chunk(chunk)
+                    ):
                         yield event
 
             yield CompleteEvent()
@@ -236,10 +290,10 @@ class StreamParser:
             )
 
         if isinstance(self._stream_mode, list):
-            # Multi-mode: expect (mode_name, data) tuple
+            # Multi-mode: expect (mode_name, data) or (namespace, mode_name, data)
             if not (_is_multi_mode(chunk)):
                 return []
-            mode_name, data = chunk
+            mode_name, data = _unwrap_multi_chunk(chunk)
             handler = self._create_handler_for_mode(
                 mode_name,
                 suppress_content=(mode_name == "updates"),
@@ -247,7 +301,7 @@ class StreamParser:
             return list(handler.process_chunk(data))
 
         handler = self._create_handler_for_mode(self._stream_mode)
-        return list(handler.process_chunk(chunk))
+        return list(handler.process_chunk(_unwrap_single_chunk(chunk)))
 
     def _create_updates_handler(
         self, suppress_content: bool = False
@@ -284,15 +338,18 @@ class StreamParser:
 
         In dual mode, ContentEvent comes from "messages" (token-level)
         and tool/interrupt/state events come from "updates".
+
+        Handles both regular ``(mode, data)`` and subgraph
+        ``(namespace, mode, data)`` chunk formats.
         """
         updates_handler = self._create_updates_handler(suppress_content=True)
         messages_handler = self._create_messages_handler()
 
         for chunk in stream:
-            if not isinstance(chunk, tuple) or len(chunk) != 2:
+            if not _is_multi_mode(chunk):
                 continue
 
-            mode_name, data = chunk
+            mode_name, data = _unwrap_multi_chunk(chunk)
 
             if mode_name == "updates":
                 yield from updates_handler.process_chunk(data)
@@ -307,10 +364,10 @@ class StreamParser:
         messages_handler = self._create_messages_handler()
 
         async for chunk in stream:
-            if not isinstance(chunk, tuple) or len(chunk) != 2:
+            if not _is_multi_mode(chunk):
                 continue
 
-            mode_name, data = chunk
+            mode_name, data = _unwrap_multi_chunk(chunk)
 
             if mode_name == "updates":
                 for event in updates_handler.process_chunk(data):
@@ -323,6 +380,10 @@ class StreamParser:
         self, stream: Iterator[Any]
     ) -> tuple[Iterator[Any], str | list[str]]:
         """Peek at the first chunk to auto-detect stream format.
+
+        Detects regular and subgraph formats:
+        - Multi-mode: ``(mode, data)`` or ``(namespace, mode, data)``
+        - Single-mode: plain dict or ``(namespace, data)``
 
         Returns:
             (chained_stream, detected_mode) where detected_mode is

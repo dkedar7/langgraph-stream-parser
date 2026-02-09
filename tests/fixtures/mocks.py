@@ -336,6 +336,32 @@ DUAL_UPDATES_TOOL_CALL = ("updates", AI_MESSAGE_WITH_TOOL_CALLS)
 DUAL_UPDATES_TOOL_RESULT = ("updates", TOOL_MESSAGE_SUCCESS)
 DUAL_UPDATES_INTERRUPT = ("updates", INTERRUPT_WITH_ACTIONS)
 
+# --- Subgraph (subgraphs=True) fixtures ---
+# Namespaces: () = parent graph, ("child_node:uuid",) = subgraph
+NAMESPACE_PARENT = ()
+NAMESPACE_CHILD = ("researcher:abc123",)
+
+# Single-mode + subgraphs: (namespace, data)
+SUBGRAPH_SINGLE_PARENT = (NAMESPACE_PARENT, SIMPLE_AI_MESSAGE)
+SUBGRAPH_SINGLE_CHILD = (NAMESPACE_CHILD, {
+    "agent": {
+        "messages": [
+            AIMessage(content="Subgraph response from researcher.")
+        ]
+    }
+})
+SUBGRAPH_SINGLE_CHILD_TOOL = (NAMESPACE_CHILD, AI_MESSAGE_WITH_TOOL_CALLS)
+
+# Multi-mode + subgraphs: (namespace, mode_name, data) — 3-tuples
+SUBGRAPH_MULTI_PARENT_MSG = (NAMESPACE_PARENT, "messages", MESSAGES_CHUNK_TOKEN_1)
+SUBGRAPH_MULTI_CHILD_MSG = (NAMESPACE_CHILD, "messages", (
+    AIMessageChunk(content="Sub token"), MESSAGES_METADATA
+))
+SUBGRAPH_MULTI_PARENT_UPD = (NAMESPACE_PARENT, "updates", SIMPLE_AI_MESSAGE)
+SUBGRAPH_MULTI_CHILD_UPD = (NAMESPACE_CHILD, "updates", AI_MESSAGE_WITH_TOOL_CALLS)
+SUBGRAPH_MULTI_CHILD_TOOL_RESULT = (NAMESPACE_CHILD, "updates", TOOL_MESSAGE_SUCCESS)
+SUBGRAPH_MULTI_CHILD_INTERRUPT = (NAMESPACE_CHILD, "updates", INTERRUPT_WITH_ACTIONS)
+
 # Backward compatibility aliases
 MockAIMessage = AIMessage
 MockToolMessage = ToolMessage
