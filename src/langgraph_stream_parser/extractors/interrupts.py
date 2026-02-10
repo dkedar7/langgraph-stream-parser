@@ -7,11 +7,32 @@ during human-in-the-loop workflows.
 from typing import Any
 
 
+def _extract_from_interrupt_obj(obj: Any) -> tuple[list[Any], list[Any]]:
+    """Extract action_requests and review_configs from a single interrupt object.
+
+    Handles both Interrupt objects (with .value dict) and plain dicts/objects.
+    """
+    if hasattr(obj, 'value') and isinstance(obj.value, dict):
+        return (
+            obj.value.get('action_requests', []),
+            obj.value.get('review_configs', []),
+        )
+    if isinstance(obj, dict):
+        return (
+            obj.get('action_requests', []),
+            obj.get('review_configs', []),
+        )
+    return (
+        getattr(obj, 'action_requests', []),
+        getattr(obj, 'review_configs', []),
+    )
+
+
 def parse_interrupt_value(interrupt_value: Any) -> tuple[list[Any], list[Any]]:
     """Parse interrupt value into action_requests and review_configs.
 
     Handles different interrupt value formats from LangGraph:
-        - Tuple formats (single element, two elements)
+        - Tuple of Interrupt objects (one or more)
         - Object formats with attributes
         - Dict formats with keys
 
@@ -26,18 +47,30 @@ def parse_interrupt_value(interrupt_value: Any) -> tuple[list[Any], list[Any]]:
     review_configs: list[Any] = []
 
     if isinstance(interrupt_value, tuple):
-        if len(interrupt_value) == 1:
-            # Single-element tuple containing Interrupt object
-            interrupt_obj = interrupt_value[0]
-            if hasattr(interrupt_obj, 'value') and isinstance(interrupt_obj.value, dict):
-                action_requests = interrupt_obj.value.get('action_requests', [])
-                review_configs = interrupt_obj.value.get('review_configs', [])
-            else:
-                action_requests = getattr(interrupt_obj, 'action_requests', [])
-                review_configs = getattr(interrupt_obj, 'review_configs', [])
+        # Check if elements are Interrupt objects (have .value attribute)
+        # This handles tuples of any length from LangGraph
+        if len(interrupt_value) > 0 and hasattr(interrupt_value[0], 'value'):
+            # Tuple of Interrupt objects — aggregate from all
+            for interrupt_obj in interrupt_value:
+                actions, configs = _extract_from_interrupt_obj(interrupt_obj)
+                action_requests.extend(actions)
+                review_configs.extend(configs)
+        elif len(interrupt_value) == 1:
+            # Single-element tuple containing a dict or other object
+            action_requests, review_configs = _extract_from_interrupt_obj(
+                interrupt_value[0]
+            )
         elif len(interrupt_value) == 2:
-            # Two-element tuple: (action_requests, review_configs)
-            action_requests, review_configs = interrupt_value
+            # Legacy format: (action_requests, review_configs) as plain lists
+            first, second = interrupt_value
+            if isinstance(first, list) and isinstance(second, list):
+                action_requests, review_configs = first, second
+            else:
+                # Unknown format — try to extract from each element
+                for item in interrupt_value:
+                    actions, configs = _extract_from_interrupt_obj(item)
+                    action_requests.extend(actions)
+                    review_configs.extend(configs)
     elif isinstance(interrupt_value, dict):
         action_requests = interrupt_value.get('action_requests', [])
         review_configs = interrupt_value.get('review_configs', [])
