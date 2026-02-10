@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.3] - 2026-02-09
+
+### Fixed
+- Handle multi-element interrupt tuples from LangGraph subgraphs
+- Aggregate `action_requests` and `review_configs` across all Interrupt objects in a tuple
+
 ## [0.1.2] - 2026-02-08
 
 ### Added
