@@ -62,6 +62,7 @@ def prepare_agent_input(
     message: str | None = None,
     decisions: list[dict[str, Any]] | None = None,
     raw_input: Any = None,
+    context_parts: list[str] | None = None,
 ) -> Any:
     """Prepare input for a LangGraph agent.
 
@@ -75,6 +76,9 @@ def prepare_agent_input(
             to a Command object.
         raw_input: Raw input passed directly (for custom formats).
             Bypasses all processing.
+        context_parts: Optional list of context lines to prepend to the
+            message (e.g., timestamp, working directory). Only used with
+            ``message``. Each part becomes a line before the message content.
 
     Returns:
         Prepared input for the agent.
@@ -85,6 +89,12 @@ def prepare_agent_input(
     Example:
         # Regular message
         input_data = prepare_agent_input(message="Hello!")
+
+        # Message with context
+        input_data = prepare_agent_input(
+            message="What time is it?",
+            context_parts=["[Current time: 2025-01-01 12:00:00 UTC]"],
+        )
 
         # Resume from interrupt
         input_data = prepare_agent_input(decisions=[{"type": "approve"}])
@@ -110,7 +120,10 @@ def prepare_agent_input(
 
     # Handle regular message
     if message is not None:
-        return {"messages": [{"role": "user", "content": message}]}
+        content = message
+        if context_parts:
+            content = "\n".join(context_parts) + "\n\n" + content
+        return {"messages": [{"role": "user", "content": content}]}
 
     # Handle resume from interrupt
     if decisions is not None:
