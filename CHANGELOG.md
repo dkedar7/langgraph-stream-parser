@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.4] - 2026-02-06
+
+### Added
+- `context_parts` parameter on `prepare_agent_input()` for prepending context lines (e.g., timestamp, working directory) to user messages
+
 ## [0.1.3] - 2026-02-09
 
 ### Fixed
