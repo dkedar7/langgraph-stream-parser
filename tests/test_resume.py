@@ -67,3 +67,27 @@ class TestPrepareAgentInput:
             prepare_agent_input(message="Hi", raw_input={"x": 1})
 
         assert "Can only provide one of" in str(exc_info.value)
+
+    def test_with_context_parts(self):
+        result = prepare_agent_input(
+            message="Hello!",
+            context_parts=["[Current time: 2025-01-01 12:00:00 UTC]"],
+        )
+
+        content = result["messages"][0]["content"]
+        assert content == "[Current time: 2025-01-01 12:00:00 UTC]\n\nHello!"
+
+    def test_with_multiple_context_parts(self):
+        result = prepare_agent_input(
+            message="Hello!",
+            context_parts=["[Time: now]", "[CWD: /tmp]"],
+        )
+
+        content = result["messages"][0]["content"]
+        assert content == "[Time: now]\n[CWD: /tmp]\n\nHello!"
+
+    def test_context_parts_without_message_ignored(self):
+        """context_parts is only used with message, ignored otherwise."""
+        custom = {"custom": "data"}
+        result = prepare_agent_input(raw_input=custom, context_parts=["ignored"])
+        assert result == custom
