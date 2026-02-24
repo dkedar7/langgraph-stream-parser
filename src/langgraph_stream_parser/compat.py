@@ -10,6 +10,7 @@ from typing import Any, AsyncIterator, Iterator
 from .events import (
     CompleteEvent,
     ContentEvent,
+    CustomEvent,
     ErrorEvent,
     InterruptEvent,
     StreamEvent,
@@ -96,6 +97,12 @@ def _event_to_dict(event: StreamEvent) -> dict[str, Any] | None:
             return {
                 "error": error,
                 "status": "error",
+            }
+
+        case CustomEvent(data=data):
+            return {
+                "custom": data,
+                "status": "streaming",
             }
 
         case _:
