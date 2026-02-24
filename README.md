@@ -42,14 +42,18 @@ for event in parser.parse(graph.stream(input_data, stream_mode="updates")):
 
 | Event | Description |
 |-------|-------------|
-| `ContentEvent` | Text content from AI messages |
+| `ContentEvent` | Text content from AI messages. Includes `agent_name` when from a deep agent subagent. |
 | `ToolCallStartEvent` | Tool call initiated by AI |
 | `ToolCallEndEvent` | Tool call completed with result |
 | `ToolExtractedEvent` | Special content extracted from tool (e.g., reflections, todos) |
 | `InterruptEvent` | Human-in-the-loop interrupt requiring decision |
 | `StateUpdateEvent` | Non-message state updates (opt-in) |
+| `UsageEvent` | Token usage metadata (input/output/total tokens) |
+| `CustomEvent` | Custom data emitted via `get_stream_writer()` |
 | `CompleteEvent` | Stream finished successfully |
 | `ErrorEvent` | Error during streaming |
+
+All events (except `CompleteEvent` and `ErrorEvent`) carry a `namespace` field that identifies which subgraph produced the event — `None` for the parent graph, or a tuple like `("researcher:abc123",)` for subgraphs.
 
 All events have a `to_dict()` method for JSON serialization. Use `event_to_dict(event)` for a convenient conversion function.
 
@@ -162,10 +166,81 @@ async def stream_agent():
         handle_event(event)
 ```
 
+### Dual Stream Mode (Token-Level Streaming)
+
+For real-time token streaming alongside full tool lifecycle, use dual mode:
+
+```python
+parser = StreamParser(stream_mode=["updates", "messages"])
+
+stream = graph.stream(
+    input_data, config=config,
+    stream_mode=["updates", "messages"],
+)
+
+for event in parser.parse(stream):
+    match event:
+        case ContentEvent(content=text):
+            # Token-by-token from "messages" mode
+            print(text, end="", flush=True)
+        case ToolCallStartEvent(name=name):
+            # Complete tool calls from "updates" mode
+            print(f"\nCalling {name}...")
+```
+
+The parser automatically deduplicates: `ContentEvent` comes from `"messages"` (token-level), while tool calls, interrupts, and state updates come from `"updates"`.
+
+You can also use `stream_mode="auto"` to auto-detect the format from the first chunk.
+
+### Subgraph & Deep Agent Support
+
+When streaming with `subgraphs=True`, events carry a `namespace` identifying which subgraph produced them:
+
+```python
+parser = StreamParser(stream_mode=["updates", "messages"])
+
+stream = graph.stream(
+    input_data, config=config,
+    stream_mode=["updates", "messages"],
+    subgraphs=True,
+)
+
+for event in parser.parse(stream):
+    if isinstance(event, ContentEvent):
+        if event.namespace:
+            print(f"[subagent] {event.content}", end="")
+        else:
+            print(event.content, end="")
+```
+
+For [LangChain deep agents](https://docs.langchain.com/oss/python/deepagents/subagents), `ContentEvent.agent_name` is extracted from `lc_agent_name` metadata:
+
+```python
+case ContentEvent(content=text, agent_name=name):
+    label = f"[{name}] " if name else ""
+    print(f"{label}{text}", end="")
+```
+
+### Custom Stream Mode
+
+Handle custom data from `get_stream_writer()`:
+
+```python
+parser = StreamParser(stream_mode=["updates", "messages", "custom"])
+
+for event in parser.parse(stream):
+    match event:
+        case CustomEvent(data=data):
+            print(f"Progress: {data}")
+```
+
 ### Configuration Options
 
 ```python
 parser = StreamParser(
+    # Stream format to expect (default: "updates")
+    stream_mode="updates",  # or "messages", "custom", "auto", or a list
+
     # Track tool call lifecycle (start -> end)
     track_tool_lifecycle=True,
 
