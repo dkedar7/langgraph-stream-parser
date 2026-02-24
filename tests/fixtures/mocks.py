@@ -362,6 +362,33 @@ SUBGRAPH_MULTI_CHILD_UPD = (NAMESPACE_CHILD, "updates", AI_MESSAGE_WITH_TOOL_CAL
 SUBGRAPH_MULTI_CHILD_TOOL_RESULT = (NAMESPACE_CHILD, "updates", TOOL_MESSAGE_SUCCESS)
 SUBGRAPH_MULTI_CHILD_INTERRUPT = (NAMESPACE_CHILD, "updates", INTERRUPT_WITH_ACTIONS)
 
+# --- Custom mode fixtures ---
+
+CUSTOM_CHUNK_SIMPLE = {"progress": 0.5, "step": "analyzing"}
+DUAL_CUSTOM_CHUNK = ("custom", {"progress": 0.75, "step": "writing"})
+SUBGRAPH_CUSTOM_CHILD = (NAMESPACE_CHILD, "custom", {"progress": 1.0, "step": "done"})
+
+# --- Agent name fixtures (for lc_agent_name metadata) ---
+
+MESSAGES_METADATA_WITH_AGENT = {
+    "langgraph_node": "agent",
+    "langgraph_step": 1,
+    "lc_agent_name": "researcher",
+}
+
+MESSAGES_CHUNK_WITH_AGENT_NAME = (
+    AIMessageChunk(content="From researcher"),
+    MESSAGES_METADATA_WITH_AGENT,
+)
+
+DUAL_MESSAGES_WITH_AGENT = ("messages", MESSAGES_CHUNK_WITH_AGENT_NAME)
+
+SUBGRAPH_MULTI_CHILD_MSG_WITH_AGENT = (
+    NAMESPACE_CHILD,
+    "messages",
+    (AIMessageChunk(content="Sub agent token"), MESSAGES_METADATA_WITH_AGENT),
+)
+
 # Backward compatibility aliases
 MockAIMessage = AIMessage
 MockToolMessage = ToolMessage
