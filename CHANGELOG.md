@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.5] - 2026-02-06
+
+### Added
+- Subgraph namespace preservation on events (`namespace` field on `ContentEvent`, `ToolCallStartEvent`, `ToolCallEndEvent`, `ToolExtractedEvent`, `InterruptEvent`, `StateUpdateEvent`, `UsageEvent`)
+- `agent_name` field on `ContentEvent`, extracted from `lc_agent_name` metadata in messages mode (for deep agent subagents)
+- `CustomEvent` for data emitted via `get_stream_writer()` (`stream_mode="custom"`)
+- `stream_mode="custom"` support in single and multi-mode parsing
+
 ## [0.1.4] - 2026-02-06
 
 ### Added
