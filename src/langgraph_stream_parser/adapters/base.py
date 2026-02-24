@@ -18,6 +18,7 @@ from ..events import (
     ToolExtractedEvent,
     InterruptEvent,
     StateUpdateEvent,
+    CustomEvent,
     CompleteEvent,
     ErrorEvent,
 )
@@ -309,6 +310,9 @@ class BaseAdapter(ABC):
             case CompleteEvent():
                 self._flush_current_message()
                 self._complete = True
+
+            case CustomEvent():
+                self._display_items.append(("custom", event))
 
             case StateUpdateEvent():
                 pass  # Ignored in display

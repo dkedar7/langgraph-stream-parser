@@ -80,11 +80,14 @@ class MessagesHandler:
             return
 
         node_name = None
+        agent_name = None
         if isinstance(metadata, dict):
             node_name = metadata.get("langgraph_node")
+            agent_name = metadata.get("lc_agent_name")
 
         yield ContentEvent(
             content=content,
             role="assistant",
             node=node_name,
+            agent_name=agent_name,
         )

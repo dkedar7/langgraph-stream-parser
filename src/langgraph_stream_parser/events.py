@@ -18,21 +18,30 @@ class ContentEvent:
         content: The text content from the message.
         role: The role of the message sender ("assistant" or "human").
         node: The name of the graph node that produced this content.
+        agent_name: The deep agent name from ``lc_agent_name`` metadata.
+        namespace: The subgraph namespace path, if from a subgraph.
         timestamp: When the event was created.
     """
     content: str
     role: Literal["assistant", "human"] = "assistant"
     node: str | None = None
+    agent_name: str | None = None
+    namespace: tuple[str, ...] | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to JSON-serializable dict for web APIs."""
-        return {
+        d: dict[str, Any] = {
             "type": "content",
             "content": self.content,
             "role": self.role,
             "node": self.node,
         }
+        if self.agent_name is not None:
+            d["agent_name"] = self.agent_name
+        if self.namespace is not None:
+            d["namespace"] = list(self.namespace)
+        return d
 
 
 @dataclass
@@ -47,23 +56,28 @@ class ToolCallStartEvent:
         name: Name of the tool being called.
         args: Arguments passed to the tool.
         node: The name of the graph node that initiated the call.
+        namespace: The subgraph namespace path, if from a subgraph.
         timestamp: When the event was created.
     """
     id: str
     name: str
     args: dict[str, Any]
     node: str | None = None
+    namespace: tuple[str, ...] | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to JSON-serializable dict for web APIs."""
-        return {
+        d: dict[str, Any] = {
             "type": "tool_start",
             "id": self.id,
             "name": self.name,
             "args": self.args,
             "node": self.node,
         }
+        if self.namespace is not None:
+            d["namespace"] = list(self.namespace)
+        return d
 
 
 @dataclass
@@ -80,6 +94,7 @@ class ToolCallEndEvent:
         status: Whether the tool succeeded or errored.
         error_message: Error details if status is "error".
         duration_ms: Execution time in milliseconds if available.
+        namespace: The subgraph namespace path, if from a subgraph.
         timestamp: When the event was created.
     """
     id: str
@@ -88,6 +103,7 @@ class ToolCallEndEvent:
     status: Literal["success", "error"]
     error_message: str | None = None
     duration_ms: float | None = None
+    namespace: tuple[str, ...] | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
     def to_dict(self, max_result_len: int = 500) -> dict[str, Any]:
@@ -99,7 +115,7 @@ class ToolCallEndEvent:
         result_str = str(self.result)
         if len(result_str) > max_result_len:
             result_str = result_str[:max_result_len] + "..."
-        return {
+        d: dict[str, Any] = {
             "type": "tool_end",
             "id": self.id,
             "name": self.name,
@@ -108,6 +124,9 @@ class ToolCallEndEvent:
             "error_message": self.error_message,
             "duration_ms": self.duration_ms,
         }
+        if self.namespace is not None:
+            d["namespace"] = list(self.namespace)
+        return d
 
 
 @dataclass
@@ -123,21 +142,26 @@ class ToolExtractedEvent:
         extracted_type: Type identifier for the extracted content
             (e.g., "reflection", "todos", "canvas_item").
         data: The extracted data.
+        namespace: The subgraph namespace path, if from a subgraph.
         timestamp: When the event was created.
     """
     tool_name: str
     extracted_type: str
     data: Any
+    namespace: tuple[str, ...] | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to JSON-serializable dict for web APIs."""
-        return {
+        d: dict[str, Any] = {
             "type": "extraction",
             "tool_name": self.tool_name,
             "extracted_type": self.extracted_type,
             "data": self.data,
         }
+        if self.namespace is not None:
+            d["namespace"] = list(self.namespace)
+        return d
 
 
 @dataclass
@@ -154,11 +178,13 @@ class InterruptEvent:
         review_configs: Configuration for how actions should be reviewed.
             Each item may contain 'allowed_decisions' list.
         raw_value: The original interrupt value for custom handling.
+        namespace: The subgraph namespace path, if from a subgraph.
         timestamp: When the event was created.
     """
     action_requests: list[dict[str, Any]]
     review_configs: list[dict[str, Any]]
     raw_value: Any = None
+    namespace: tuple[str, ...] | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
     @property
@@ -245,12 +271,15 @@ class InterruptEvent:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to JSON-serializable dict for web APIs."""
-        return {
+        d: dict[str, Any] = {
             "type": "interrupt",
             "action_requests": self.action_requests,
             "review_configs": self.review_configs,
             "allowed_decisions": list(self.allowed_decisions),
         }
+        if self.namespace is not None:
+            d["namespace"] = list(self.namespace)
+        return d
 
 
 @dataclass
@@ -264,21 +293,26 @@ class StateUpdateEvent:
         node: The name of the graph node that produced this update.
         key: The state key that was updated.
         value: The new value for the state key.
+        namespace: The subgraph namespace path, if from a subgraph.
         timestamp: When the event was created.
     """
     node: str
     key: str
     value: Any
+    namespace: tuple[str, ...] | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to JSON-serializable dict for web APIs."""
-        return {
+        d: dict[str, Any] = {
             "type": "state_update",
             "node": self.node,
             "key": self.key,
             "value": self.value,
         }
+        if self.namespace is not None:
+            d["namespace"] = list(self.namespace)
+        return d
 
 
 @dataclass
@@ -294,23 +328,56 @@ class UsageEvent:
         output_tokens: Number of output (completion) tokens.
         total_tokens: Sum of input and output tokens.
         node: The name of the graph node that produced this usage.
+        namespace: The subgraph namespace path, if from a subgraph.
         timestamp: When the event was created.
     """
     input_tokens: int
     output_tokens: int
     total_tokens: int
     node: str | None = None
+    namespace: tuple[str, ...] | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to JSON-serializable dict for web APIs."""
-        return {
+        d: dict[str, Any] = {
             "type": "usage",
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "total_tokens": self.total_tokens,
             "node": self.node,
         }
+        if self.namespace is not None:
+            d["namespace"] = list(self.namespace)
+        return d
+
+
+@dataclass
+class CustomEvent:
+    """Custom data emitted via ``get_stream_writer()``.
+
+    Emitted when the graph uses ``stream_mode="custom"`` or when
+    custom chunks appear in multi-mode streaming. The data field
+    contains whatever the agent wrote with ``get_stream_writer()``.
+
+    Attributes:
+        data: The custom data. Can be any type.
+        namespace: The subgraph namespace path, if from a subgraph.
+        timestamp: When the event was created.
+    """
+    data: Any
+    namespace: tuple[str, ...] | None = None
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict for web APIs."""
+        d: dict[str, Any] = {
+            "type": "custom",
+            "data": self.data,
+        }
+        if self.namespace is not None:
+            d["namespace"] = list(self.namespace)
+        return d
 
 
 @dataclass
@@ -384,6 +451,7 @@ StreamEvent = Union[
     InterruptEvent,
     StateUpdateEvent,
     UsageEvent,
+    CustomEvent,
     CompleteEvent,
     ErrorEvent,
 ]
