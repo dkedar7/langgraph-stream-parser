@@ -8,6 +8,7 @@ from typing import Any, AsyncIterator, Iterator
 
 from .events import (
     CompleteEvent,
+    CustomEvent,
     ErrorEvent,
     StreamEvent,
     ToolCallStartEvent,
@@ -17,7 +18,7 @@ from .extractors.builtins import ThinkToolExtractor, TodoExtractor, DisplayInlin
 from .handlers.messages import MessagesHandler
 from .handlers.updates import UpdatesHandler
 
-_VALID_MODES = {"updates", "messages"}
+_VALID_MODES = {"updates", "messages", "custom"}
 
 
 def _is_multi_mode(chunk: Any) -> bool:
@@ -49,34 +50,60 @@ def _is_subgraph_single_mode(chunk: Any) -> bool:
     )
 
 
-def _unwrap_multi_chunk(chunk: tuple) -> tuple[str, Any]:
-    """Unwrap a multi-mode chunk, stripping namespace if present.
+def _unwrap_multi_chunk(chunk: tuple) -> tuple[str, Any, tuple[str, ...] | None]:
+    """Unwrap a multi-mode chunk, extracting namespace if present.
 
     Args:
         chunk: Either (mode_name, data) or (namespace, mode_name, data).
 
     Returns:
-        (mode_name, data) with namespace stripped.
+        (mode_name, data, namespace) where namespace is None for parent graph
+        or a non-empty tuple for subgraphs.
     """
     if len(chunk) == 3 and isinstance(chunk[0], tuple):
         # Subgraph format: (namespace, mode_name, data)
-        return chunk[1], chunk[2]
+        namespace = chunk[0] if chunk[0] else None  # () → None
+        return chunk[1], chunk[2], namespace
     # Regular format: (mode_name, data)
-    return chunk[0], chunk[1]
+    return chunk[0], chunk[1], None
 
 
-def _unwrap_single_chunk(chunk: Any) -> Any:
-    """Unwrap a single-mode chunk, stripping namespace if present.
+def _unwrap_single_chunk(chunk: Any) -> tuple[Any, tuple[str, ...] | None]:
+    """Unwrap a single-mode chunk, extracting namespace if present.
 
     Args:
         chunk: Either a plain dict or (namespace, data).
 
     Returns:
-        The data with namespace stripped.
+        (data, namespace) where namespace is None for parent graph
+        or a non-empty tuple for subgraphs.
     """
     if _is_subgraph_single_mode(chunk):
-        return chunk[1]
-    return chunk
+        namespace = chunk[0] if chunk[0] else None  # () → None
+        return chunk[1], namespace
+    return chunk, None
+
+
+def _stamp_namespace(
+    events: Iterator[StreamEvent],
+    namespace: tuple[str, ...] | None,
+) -> Iterator[StreamEvent]:
+    """Stamp namespace onto events that support it.
+
+    Args:
+        events: Iterator of events from a handler.
+        namespace: Namespace tuple, or None for parent graph.
+
+    Yields:
+        Events with namespace set (if applicable).
+    """
+    if namespace is None:
+        yield from events
+        return
+    for event in events:
+        if hasattr(event, "namespace"):
+            event.namespace = namespace
+        yield event
 
 
 class StreamParser:
@@ -214,10 +241,17 @@ class StreamParser:
 
             if isinstance(effective_mode, list):
                 yield from self._parse_multi_mode(stream)
+            elif effective_mode == "custom":
+                for chunk in stream:
+                    data, namespace = _unwrap_single_chunk(chunk)
+                    yield CustomEvent(data=data, namespace=namespace)
             else:
                 handler = self._create_handler_for_mode(effective_mode)
                 for chunk in stream:
-                    yield from handler.process_chunk(_unwrap_single_chunk(chunk))
+                    data, namespace = _unwrap_single_chunk(chunk)
+                    yield from _stamp_namespace(
+                        handler.process_chunk(data), namespace
+                    )
 
             yield CompleteEvent()
 
@@ -252,11 +286,16 @@ class StreamParser:
             if isinstance(effective_mode, list):
                 async for event in self._aparse_multi_mode(stream):
                     yield event
+            elif effective_mode == "custom":
+                async for chunk in stream:
+                    data, namespace = _unwrap_single_chunk(chunk)
+                    yield CustomEvent(data=data, namespace=namespace)
             else:
                 handler = self._create_handler_for_mode(effective_mode)
                 async for chunk in stream:
-                    for event in handler.process_chunk(
-                        _unwrap_single_chunk(chunk)
+                    data, namespace = _unwrap_single_chunk(chunk)
+                    for event in _stamp_namespace(
+                        handler.process_chunk(data), namespace
                     ):
                         yield event
 
@@ -293,15 +332,26 @@ class StreamParser:
             # Multi-mode: expect (mode_name, data) or (namespace, mode_name, data)
             if not (_is_multi_mode(chunk)):
                 return []
-            mode_name, data = _unwrap_multi_chunk(chunk)
+            mode_name, data, namespace = _unwrap_multi_chunk(chunk)
+            if mode_name == "custom":
+                return [CustomEvent(data=data, namespace=namespace)]
             handler = self._create_handler_for_mode(
                 mode_name,
                 suppress_content=(mode_name == "updates"),
             )
-            return list(handler.process_chunk(data))
+            return list(_stamp_namespace(
+                handler.process_chunk(data), namespace
+            ))
+
+        if self._stream_mode == "custom":
+            data, namespace = _unwrap_single_chunk(chunk)
+            return [CustomEvent(data=data, namespace=namespace)]
 
         handler = self._create_handler_for_mode(self._stream_mode)
-        return list(handler.process_chunk(_unwrap_single_chunk(chunk)))
+        data, namespace = _unwrap_single_chunk(chunk)
+        return list(_stamp_namespace(
+            handler.process_chunk(data), namespace
+        ))
 
     def _create_updates_handler(
         self, suppress_content: bool = False
@@ -323,7 +373,12 @@ class StreamParser:
     def _create_handler_for_mode(
         self, mode: str, suppress_content: bool = False
     ) -> UpdatesHandler | MessagesHandler:
-        """Create the appropriate handler for a given mode string."""
+        """Create the appropriate handler for a given mode string.
+
+        Note: "custom" mode does not use a handler — it is handled
+        directly in the parse/routing methods. Do not call this for
+        custom mode.
+        """
         if mode == "updates":
             return self._create_updates_handler(
                 suppress_content=suppress_content
@@ -349,12 +404,18 @@ class StreamParser:
             if not _is_multi_mode(chunk):
                 continue
 
-            mode_name, data = _unwrap_multi_chunk(chunk)
+            mode_name, data, namespace = _unwrap_multi_chunk(chunk)
 
             if mode_name == "updates":
-                yield from updates_handler.process_chunk(data)
+                yield from _stamp_namespace(
+                    updates_handler.process_chunk(data), namespace
+                )
             elif mode_name == "messages":
-                yield from messages_handler.process_chunk(data)
+                yield from _stamp_namespace(
+                    messages_handler.process_chunk(data), namespace
+                )
+            elif mode_name == "custom":
+                yield CustomEvent(data=data, namespace=namespace)
 
     async def _aparse_multi_mode(
         self, stream: AsyncIterator[Any]
@@ -367,14 +428,20 @@ class StreamParser:
             if not _is_multi_mode(chunk):
                 continue
 
-            mode_name, data = _unwrap_multi_chunk(chunk)
+            mode_name, data, namespace = _unwrap_multi_chunk(chunk)
 
             if mode_name == "updates":
-                for event in updates_handler.process_chunk(data):
+                for event in _stamp_namespace(
+                    updates_handler.process_chunk(data), namespace
+                ):
                     yield event
             elif mode_name == "messages":
-                for event in messages_handler.process_chunk(data):
+                for event in _stamp_namespace(
+                    messages_handler.process_chunk(data), namespace
+                ):
                     yield event
+            elif mode_name == "custom":
+                yield CustomEvent(data=data, namespace=namespace)
 
     def _peek_and_detect(
         self, stream: Iterator[Any]
