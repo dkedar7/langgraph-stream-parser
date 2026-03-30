@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.6] - 2026-03-28
+
+### Added
+- v2 StreamPart parsing (`stream_mode="v2"`) with auto-detection of `{"type", "ns", "data"}` dict format
+- `ValuesEvent` for full state snapshots from `stream_mode="values"` (v2)
+- `DebugEvent` for debug, checkpoint, and task trace data from v2 streaming
+- Routing for v2 stream types: updates, messages, custom, values, debug, checkpoints, tasks
+
 ## [0.1.5] - 2026-02-06
 
 ### Added
