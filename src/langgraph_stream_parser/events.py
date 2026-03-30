@@ -381,6 +381,63 @@ class CustomEvent:
 
 
 @dataclass
+class ValuesEvent:
+    """Full state snapshot from ``stream_mode="values"`` (v2 streaming).
+
+    Emitted when using LangGraph v2 streaming with the "values" stream type.
+    Contains the complete graph state after each node execution.
+
+    Attributes:
+        data: The full state snapshot dict.
+        namespace: The subgraph namespace path, if from a subgraph.
+        timestamp: When the event was created.
+    """
+    data: dict[str, Any]
+    namespace: tuple[str, ...] | None = None
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict for web APIs."""
+        d: dict[str, Any] = {
+            "type": "values",
+            "data": self.data,
+        }
+        if self.namespace is not None:
+            d["namespace"] = list(self.namespace)
+        return d
+
+
+@dataclass
+class DebugEvent:
+    """Debug, checkpoint, or task trace from v2 streaming.
+
+    Emitted when using LangGraph v2 streaming with "debug", "checkpoints",
+    or "tasks" stream types. The ``debug_type`` field discriminates between them.
+
+    Attributes:
+        data: The raw trace data.
+        debug_type: Discriminator — one of "debug", "checkpoint", "task".
+        namespace: The subgraph namespace path, if from a subgraph.
+        timestamp: When the event was created.
+    """
+    data: Any
+    debug_type: str = "debug"
+    namespace: tuple[str, ...] | None = None
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict for web APIs."""
+        d: dict[str, Any] = {
+            "type": "debug",
+            "debug_type": self.debug_type,
+            "data": self.data,
+        }
+        if self.namespace is not None:
+            d["namespace"] = list(self.namespace)
+        return d
+
+
+@dataclass
 class CompleteEvent:
     """Stream completed successfully.
 
@@ -452,6 +509,8 @@ StreamEvent = Union[
     StateUpdateEvent,
     UsageEvent,
     CustomEvent,
+    ValuesEvent,
+    DebugEvent,
     CompleteEvent,
     ErrorEvent,
 ]
