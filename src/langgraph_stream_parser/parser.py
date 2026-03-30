@@ -9,9 +9,11 @@ from typing import Any, AsyncIterator, Iterator
 from .events import (
     CompleteEvent,
     CustomEvent,
+    DebugEvent,
     ErrorEvent,
     StreamEvent,
     ToolCallStartEvent,
+    ValuesEvent,
 )
 from .extractors.base import ToolExtractor
 from .extractors.builtins import ThinkToolExtractor, TodoExtractor, DisplayInlineExtractor
@@ -19,6 +21,36 @@ from .handlers.messages import MessagesHandler
 from .handlers.updates import UpdatesHandler
 
 _VALID_MODES = {"updates", "messages", "custom"}
+_V2_TYPES = {"updates", "messages", "custom", "values", "debug", "checkpoints", "tasks"}
+
+
+def _is_v2_stream_part(chunk: Any) -> bool:
+    """Check if a chunk is a v2 StreamPart dict.
+
+    v2 StreamParts have the shape ``{"type": str, "ns": tuple, "data": ...}``.
+    """
+    return (
+        isinstance(chunk, dict)
+        and "type" in chunk
+        and "ns" in chunk
+        and "data" in chunk
+        and isinstance(chunk["type"], str)
+        and isinstance(chunk["ns"], tuple)
+    )
+
+
+def _unwrap_v2_chunk(chunk: dict) -> tuple[str, Any, tuple[str, ...] | None]:
+    """Unwrap a v2 StreamPart dict.
+
+    Args:
+        chunk: A v2 StreamPart dict with "type", "ns", "data" keys.
+
+    Returns:
+        (stream_type, data, namespace) where namespace is None for root graph
+        or a non-empty tuple for subgraphs.
+    """
+    namespace = chunk["ns"] if chunk["ns"] else None  # () → None
+    return chunk["type"], chunk["data"], namespace
 
 
 def _is_multi_mode(chunk: Any) -> bool:
@@ -169,7 +201,7 @@ class StreamParser:
     def _validate_stream_mode(stream_mode: str | list[str]) -> None:
         """Validate the stream_mode parameter."""
         if isinstance(stream_mode, str):
-            valid = _VALID_MODES | {"auto"}
+            valid = _VALID_MODES | {"auto", "v2"}
             if stream_mode not in valid:
                 raise ValueError(
                     f"Unsupported stream_mode: {stream_mode!r}. "
@@ -239,7 +271,9 @@ class StreamParser:
             if effective_mode == "auto":
                 stream, effective_mode = self._peek_and_detect(stream)
 
-            if isinstance(effective_mode, list):
+            if effective_mode == "v2":
+                yield from self._parse_v2(stream)
+            elif isinstance(effective_mode, list):
                 yield from self._parse_multi_mode(stream)
             elif effective_mode == "custom":
                 for chunk in stream:
@@ -283,7 +317,10 @@ class StreamParser:
             if effective_mode == "auto":
                 stream, effective_mode = await self._apeek_and_detect(stream)
 
-            if isinstance(effective_mode, list):
+            if effective_mode == "v2":
+                async for event in self._aparse_v2(stream):
+                    yield event
+            elif isinstance(effective_mode, list):
                 async for event in self._aparse_multi_mode(stream):
                     yield event
             elif effective_mode == "custom":
@@ -327,6 +364,11 @@ class StreamParser:
                 "parse_chunk() does not support stream_mode='auto'. "
                 "Use parse() or aparse() instead."
             )
+
+        if self._stream_mode == "v2" or _is_v2_stream_part(chunk):
+            if not _is_v2_stream_part(chunk):
+                return []
+            return self._parse_v2_chunk(chunk)
 
         if isinstance(self._stream_mode, list):
             # Multi-mode: expect (mode_name, data) or (namespace, mode_name, data)
@@ -443,6 +485,87 @@ class StreamParser:
             elif mode_name == "custom":
                 yield CustomEvent(data=data, namespace=namespace)
 
+    def _route_v2_type(
+        self,
+        stream_type: str,
+        data: Any,
+        namespace: tuple[str, ...] | None,
+        updates_handler: UpdatesHandler,
+        messages_handler: MessagesHandler,
+    ) -> Iterator[StreamEvent]:
+        """Route a single v2 stream type to the appropriate handler/event."""
+        match stream_type:
+            case "updates":
+                yield from _stamp_namespace(
+                    updates_handler.process_chunk(data), namespace
+                )
+            case "messages":
+                yield from _stamp_namespace(
+                    messages_handler.process_chunk(data), namespace
+                )
+            case "custom":
+                yield CustomEvent(data=data, namespace=namespace)
+            case "values":
+                yield ValuesEvent(data=data, namespace=namespace)
+            case "debug":
+                yield DebugEvent(data=data, debug_type="debug", namespace=namespace)
+            case "checkpoints":
+                yield DebugEvent(data=data, debug_type="checkpoint", namespace=namespace)
+            case "tasks":
+                yield DebugEvent(data=data, debug_type="task", namespace=namespace)
+
+    def _parse_v2(self, stream: Iterator[Any]) -> Iterator[StreamEvent]:
+        """Parse a v2 StreamPart stream.
+
+        v2 chunks are dicts with ``{"type": str, "ns": tuple, "data": ...}``.
+        Routes each type to the appropriate handler or event.
+        """
+        updates_handler = self._create_updates_handler()
+        messages_handler = self._create_messages_handler()
+        has_messages = False
+
+        # Two-pass approach: first scan to check if messages type is present
+        # would require buffering. Instead, we use a simpler approach:
+        # process all chunks, and if we see both updates and messages types,
+        # the user should use dual mode or accept potential content duplication.
+        # In practice, v2 streams with multiple modes will have distinct types.
+
+        for chunk in stream:
+            if not _is_v2_stream_part(chunk):
+                continue
+            stream_type, data, namespace = _unwrap_v2_chunk(chunk)
+            yield from self._route_v2_type(
+                stream_type, data, namespace,
+                updates_handler, messages_handler,
+            )
+
+    async def _aparse_v2(
+        self, stream: AsyncIterator[Any]
+    ) -> AsyncIterator[StreamEvent]:
+        """Async version of _parse_v2."""
+        updates_handler = self._create_updates_handler()
+        messages_handler = self._create_messages_handler()
+
+        async for chunk in stream:
+            if not _is_v2_stream_part(chunk):
+                continue
+            stream_type, data, namespace = _unwrap_v2_chunk(chunk)
+            for event in self._route_v2_type(
+                stream_type, data, namespace,
+                updates_handler, messages_handler,
+            ):
+                yield event
+
+    def _parse_v2_chunk(self, chunk: dict) -> list[StreamEvent]:
+        """Parse a single v2 StreamPart chunk into events."""
+        stream_type, data, namespace = _unwrap_v2_chunk(chunk)
+        updates_handler = self._create_updates_handler()
+        messages_handler = self._create_messages_handler()
+        return list(self._route_v2_type(
+            stream_type, data, namespace,
+            updates_handler, messages_handler,
+        ))
+
     def _peek_and_detect(
         self, stream: Iterator[Any]
     ) -> tuple[Iterator[Any], str | list[str]]:
@@ -464,6 +587,9 @@ class StreamParser:
         if _is_multi_mode(first_chunk):
             return chain([first_chunk], stream), ["updates", "messages"]
 
+        if _is_v2_stream_part(first_chunk):
+            return chain([first_chunk], stream), "v2"
+
         return chain([first_chunk], stream), "updates"
 
     async def _apeek_and_detect(
@@ -477,6 +603,9 @@ class StreamParser:
 
         if _is_multi_mode(first_chunk):
             return _async_chain(first_chunk, stream), ["updates", "messages"]
+
+        if _is_v2_stream_part(first_chunk):
+            return _async_chain(first_chunk, stream), "v2"
 
         return _async_chain(first_chunk, stream), "updates"
 
