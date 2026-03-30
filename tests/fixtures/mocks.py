@@ -389,6 +389,47 @@ SUBGRAPH_MULTI_CHILD_MSG_WITH_AGENT = (
     (AIMessageChunk(content="Sub agent token"), MESSAGES_METADATA_WITH_AGENT),
 )
 
+# --- v2 StreamPart fixtures ---
+# v2 chunks are dicts with {"type": str, "ns": tuple, "data": ...}
+
+V2_UPDATES_SIMPLE = {"type": "updates", "ns": (), "data": SIMPLE_AI_MESSAGE}
+V2_UPDATES_TOOL_CALL = {"type": "updates", "ns": (), "data": AI_MESSAGE_WITH_TOOL_CALLS}
+V2_UPDATES_TOOL_RESULT = {"type": "updates", "ns": (), "data": TOOL_MESSAGE_SUCCESS}
+V2_UPDATES_INTERRUPT = {"type": "updates", "ns": (), "data": INTERRUPT_WITH_ACTIONS}
+V2_UPDATES_WITH_USAGE = {"type": "updates", "ns": (), "data": AI_MESSAGE_WITH_USAGE}
+
+V2_MESSAGES_TOKEN_1 = {"type": "messages", "ns": (), "data": MESSAGES_CHUNK_TOKEN_1}
+V2_MESSAGES_TOKEN_2 = {"type": "messages", "ns": (), "data": MESSAGES_CHUNK_TOKEN_2}
+V2_MESSAGES_WITH_AGENT = {"type": "messages", "ns": (), "data": MESSAGES_CHUNK_WITH_AGENT_NAME}
+
+V2_CUSTOM = {"type": "custom", "ns": (), "data": {"progress": 0.5, "step": "analyzing"}}
+
+V2_VALUES = {"type": "values", "ns": (), "data": {
+    "messages": [AIMessage(content="Hello")],
+    "step": 3,
+}}
+V2_DEBUG = {"type": "debug", "ns": (), "data": {
+    "event": "node_start",
+    "node": "agent",
+    "timestamp": "2026-01-01T00:00:00",
+}}
+V2_CHECKPOINT = {"type": "checkpoints", "ns": (), "data": {
+    "checkpoint_id": "cp_abc123",
+    "thread_id": "thread_1",
+}}
+V2_TASKS = {"type": "tasks", "ns": (), "data": {
+    "task_id": "t1",
+    "node": "agent",
+    "status": "running",
+}}
+
+# v2 subgraph fixtures
+V2_SUBGRAPH_UPDATES = {"type": "updates", "ns": NAMESPACE_CHILD, "data": SIMPLE_AI_MESSAGE}
+V2_SUBGRAPH_MESSAGES = {"type": "messages", "ns": NAMESPACE_CHILD, "data": MESSAGES_CHUNK_TOKEN_1}
+V2_SUBGRAPH_CUSTOM = {"type": "custom", "ns": NAMESPACE_CHILD, "data": {"progress": 1.0}}
+V2_SUBGRAPH_VALUES = {"type": "values", "ns": NAMESPACE_CHILD, "data": {"step": 5}}
+V2_SUBGRAPH_DEBUG = {"type": "debug", "ns": NAMESPACE_CHILD, "data": {"event": "node_end"}}
+
 # Backward compatibility aliases
 MockAIMessage = AIMessage
 MockToolMessage = ToolMessage
