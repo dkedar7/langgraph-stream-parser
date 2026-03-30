@@ -19,6 +19,8 @@ from ..events import (
     InterruptEvent,
     StateUpdateEvent,
     CustomEvent,
+    ValuesEvent,
+    DebugEvent,
     CompleteEvent,
     ErrorEvent,
 )
@@ -313,6 +315,12 @@ class BaseAdapter(ABC):
 
             case CustomEvent():
                 self._display_items.append(("custom", event))
+
+            case ValuesEvent():
+                self._display_items.append(("values", event))
+
+            case DebugEvent():
+                pass  # Ignored in display by default
 
             case StateUpdateEvent():
                 pass  # Ignored in display
