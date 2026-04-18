@@ -308,6 +308,66 @@ adapter.run(graph=agent, input_data=input_data, config=config)
 
 Universal output that works in any Python environment without dependencies.
 
+### FastAPIAdapter - WebSocket / SSE Streaming
+
+Stream events to a web client over WebSocket or Server-Sent Events. The adapter is stateless — conversation state lives in LangGraph's checkpointer, keyed by `session_id` (used as `thread_id`).
+
+```python
+from fastapi import FastAPI, WebSocket
+from langgraph_stream_parser.adapters import FastAPIAdapter
+
+app = FastAPI()
+adapter = FastAPIAdapter(graph=agent)  # agent must be compiled with a checkpointer
+
+@app.websocket("/chat/{session_id}")
+async def chat(ws: WebSocket, session_id: str):
+    await adapter.handle_websocket(ws, session_id)
+```
+
+Reconnecting with the same `session_id` resumes the conversation — LangGraph's checkpointer rehydrates history automatically.
+
+**WebSocket message protocol (client ↔ server)**
+
+Client → Server:
+
+```jsonc
+{"type": "message", "content": "Hello"}
+{"type": "decision", "decisions": [{"type": "approve"}]}
+{"type": "decision", "decisions": [{"type": "edit", "args": {...}}]}
+{"type": "cancel"}
+```
+
+Server → Client: every event's `to_dict()` output (e.g. `{"type": "content", ...}`, `{"type": "tool_start", ...}`, `{"type": "interrupt", ...}`, `{"type": "complete"}`), plus protocol-level messages:
+
+```jsonc
+{"type": "ack", "ref": "message|decision|cancel"}
+{"type": "error", "error": "..."}
+```
+
+**Server-Sent Events**
+
+```python
+from fastapi.responses import StreamingResponse
+from langgraph_stream_parser import prepare_agent_input
+
+@app.post("/chat/{session_id}")
+async def chat(session_id: str, body: dict):
+    input_data = prepare_agent_input(message=body["message"])
+    return StreamingResponse(
+        adapter.sse_stream(session_id, input_data),
+        media_type="text/event-stream",
+    )
+
+@app.post("/chat/{session_id}/resume")
+async def resume(session_id: str, body: dict):
+    return StreamingResponse(
+        adapter.resume(session_id, body["decisions"]),
+        media_type="text/event-stream",
+    )
+```
+
+Requires: `pip install langgraph-stream-parser[fastapi]`
+
 ### JupyterDisplay - Rich Notebook Display
 
 ```python

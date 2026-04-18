@@ -3,5 +3,13 @@
 from .base import BaseAdapter, ToolStatus, ToolState
 from .print import PrintAdapter
 from .cli import CLIAdapter
+from .fastapi import FastAPIAdapter
 
-__all__ = ["BaseAdapter", "ToolStatus", "ToolState", "PrintAdapter", "CLIAdapter"]
+__all__ = [
+    "BaseAdapter",
+    "ToolStatus",
+    "ToolState",
+    "PrintAdapter",
+    "CLIAdapter",
+    "FastAPIAdapter",
+]

@@ -128,7 +128,6 @@ class CLIAdapter(BaseAdapter):
         )
         self._use_spinner = use_spinner
         self._use_colors = use_colors
-        self._last_rendered_count = 0
         self._spinner: Spinner | None = None
         self._active_tools: set[str] = set()
 
@@ -139,7 +138,6 @@ class CLIAdapter(BaseAdapter):
     def reset(self) -> None:
         """Reset state for a new stream."""
         super().reset()
-        self._last_rendered_count = 0
         self._stop_spinner()
         self._active_tools.clear()
 
@@ -420,9 +418,7 @@ class CLIAdapter(BaseAdapter):
         """Print extracted content with styled formatting."""
         c = self._c
 
-        data_str = str(event.data)
-        if len(data_str) > self._max_content_preview:
-            data_str = data_str[:self._max_content_preview] + "..."
+        data_str = self._truncate(str(event.data))
 
         # Special handling for todo types
         if event.extracted_type in self._todo_types and isinstance(event.data, list):
