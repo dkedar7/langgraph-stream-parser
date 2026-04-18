@@ -50,6 +50,8 @@ for event in parser.parse(graph.stream(input_data, stream_mode="updates")):
 | `StateUpdateEvent` | Non-message state updates (opt-in) |
 | `UsageEvent` | Token usage metadata (input/output/total tokens) |
 | `CustomEvent` | Custom data emitted via `get_stream_writer()` |
+| `ValuesEvent` | Full state snapshot from `stream_mode="values"` (v2) |
+| `DebugEvent` | Debug, checkpoint, or task trace from v2 streaming |
 | `CompleteEvent` | Stream finished successfully |
 | `ErrorEvent` | Error during streaming |
 
@@ -415,16 +417,17 @@ The package includes extractors for common LangGraph tools:
 
 - **ThinkToolExtractor**: Extracts reflections from `think_tool`
 - **TodoExtractor**: Extracts todo lists from `write_todos`
+- **DisplayInlineExtractor**: Extracts inline display artifacts from `display_inline`
 
 ## Examples
 
 ### FastAPI WebSocket Streaming
 
-See [examples/fastapi_websocket.py](examples/fastapi_websocket.py) for a complete example of streaming LangGraph events to a web client via WebSockets.
+See [examples/fastapi_websocket.py](examples/fastapi_websocket.py) for a complete example using `FastAPIAdapter` to stream LangGraph events to a web client.
 
 ```bash
 # Install dependencies
-pip install fastapi uvicorn websockets
+pip install 'langgraph-stream-parser[fastapi]' uvicorn
 
 # Run the example
 uvicorn examples.fastapi_websocket:app --reload
