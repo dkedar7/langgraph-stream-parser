@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.7] - 2026-04-18
+
+### Added
+- `FastAPIAdapter` for streaming LangGraph events over WebSocket and Server-Sent Events; stateless by design — conversation state is keyed by `session_id` used as LangGraph `thread_id`
+- Per-session asyncio lock with refcounted cleanup to serialize concurrent turns on the same thread
+- `BaseAdapter._text_prompt_interrupt()` helper, shared by `PrintAdapter` and `JupyterDisplay`
+- `BaseAdapter._truncate()` helper for preview-length capping
+- `fastapi` optional dependency group (`pip install langgraph-stream-parser[fastapi]`)
+
+### Changed
+- Hoisted `_last_rendered_count` incremental-render cursor from Print/CLI into `BaseAdapter`
+- Slimmed `examples/fastapi_websocket.py` from ~455 to ~234 lines by using the new adapter
+
+### Fixed
+- `UsageEvent` now has an explicit case in `BaseAdapter._process_event` instead of silently falling through
+
 ## [0.1.6] - 2026-03-28
 
 ### Added
