@@ -154,41 +154,8 @@ class JupyterDisplay(BaseAdapter):
             console.print("[dim]done[/dim]")
 
     def prompt_interrupt(self, event: InterruptEvent) -> list[dict[str, Any]] | None:
-        """Prompt user for interrupt decision using input().
-
-        Args:
-            event: The InterruptEvent requiring a decision.
-
-        Returns:
-            List of decision dicts, or None if cancelled.
-        """
-        allowed = self.get_allowed_decisions(event)
-        options = sorted(allowed)
-        options_str = "/".join(options)
-
-        # Use input for user prompt
-        try:
-            response = input(f"Decision ({options_str}): ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            return None
-
-        if not response or response not in allowed:
-            # Default to reject or first option
-            response = "reject" if "reject" in allowed else options[0]
-
-        # Handle edit with args prompt
-        args_modifier = None
-        if response == "edit":
-            try:
-                import json
-                new_args_str = input("New args (JSON): ").strip()
-                if new_args_str:
-                    new_args = json.loads(new_args_str)
-                    args_modifier = lambda _: new_args  # noqa: E731
-            except (EOFError, KeyboardInterrupt, json.JSONDecodeError):
-                response = "reject"
-
-        return self.build_decisions(event, response, args_modifier)
+        """Prompt user for interrupt decision via ``input()``."""
+        return self._text_prompt_interrupt(event)
 
     def _render_message(self, console: Any, role: str, content: str) -> None:
         """Render a message in a compact panel."""
@@ -226,9 +193,7 @@ class JupyterDisplay(BaseAdapter):
 
     def _render_extraction(self, console: Any, event: ToolExtractedEvent) -> None:
         """Render extraction inline."""
-        data_str = str(event.data)
-        if len(data_str) > self._max_content_preview:
-            data_str = data_str[:self._max_content_preview] + "..."
+        data_str = self._truncate(str(event.data))
 
         # Special handling for todo types
         if event.extracted_type in self._todo_types and isinstance(event.data, list):

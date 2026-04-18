@@ -18,6 +18,7 @@ from ..events import (
     ToolExtractedEvent,
     InterruptEvent,
     StateUpdateEvent,
+    UsageEvent,
     CustomEvent,
     ValuesEvent,
     DebugEvent,
@@ -142,6 +143,12 @@ class BaseAdapter(ABC):
         self._error: ErrorEvent | None = None
         self._complete: bool = False
 
+        # Incremental-render cursor — the render() implementations that
+        # emit chunks as they arrive (PrintAdapter, CLIAdapter) use this
+        # to slice _display_items and only render what's new. Jupyter
+        # re-renders the full list each time, so it ignores this.
+        self._last_rendered_count: int = 0
+
     def reset(self) -> None:
         """Reset state for a new stream."""
         self._display_items.clear()
@@ -151,6 +158,7 @@ class BaseAdapter(ABC):
         self._interrupt = None
         self._error = None
         self._complete = False
+        self._last_rendered_count = 0
 
     def run(
         self,
@@ -325,6 +333,13 @@ class BaseAdapter(ABC):
             case StateUpdateEvent():
                 pass  # Ignored in display
 
+            case UsageEvent():
+                pass  # Ignored in display — subclasses may override
+
+            case _:
+                # Any future event types fall through here.
+                pass
+
     # Helper methods for subclasses
 
     def get_allowed_decisions(self, event: InterruptEvent) -> set[str]:
@@ -363,6 +378,58 @@ class BaseAdapter(ABC):
             decisions.append(decision)
 
         return decisions
+
+    def _text_prompt_interrupt(
+        self,
+        event: InterruptEvent,
+    ) -> list[dict[str, Any]] | None:
+        """Shared ``input()``-based interrupt prompt.
+
+        Used by PrintAdapter and JupyterDisplay — both prompt the user
+        via ``input()`` for a decision string and, if "edit" is chosen,
+        a JSON args object. CLIAdapter has its own arrow-key variant
+        and does not call this.
+
+        Returns:
+            Decision list for ``create_resume_input(decisions=...)``,
+            or None if the user cancelled.
+        """
+        import json as _json
+
+        allowed = self.get_allowed_decisions(event)
+        options = sorted(allowed)
+        options_str = "/".join(options)
+
+        try:
+            response = input(f"Decision ({options_str}): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return None
+
+        if not response or response not in allowed:
+            response = "reject" if "reject" in allowed else options[0]
+
+        args_modifier = None
+        if response == "edit":
+            try:
+                new_args_str = input("New args (JSON): ").strip()
+                if new_args_str:
+                    new_args = _json.loads(new_args_str)
+                    args_modifier = lambda _: new_args  # noqa: E731
+            except (EOFError, KeyboardInterrupt, _json.JSONDecodeError):
+                response = "reject"
+
+        return self.build_decisions(event, response, args_modifier)
+
+    def _truncate(self, s: str, limit: int | None = None) -> str:
+        """Truncate a string to ``max_content_preview`` (or ``limit``).
+
+        Used by adapters to cap preview sizes without each one
+        re-implementing the same slice-and-ellipsis logic.
+        """
+        cap = limit if limit is not None else self._max_content_preview
+        if len(s) > cap:
+            return s[:cap] + "..."
+        return s
 
     @staticmethod
     def format_duration(duration_ms: float | None) -> str:
