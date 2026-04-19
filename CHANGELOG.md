@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.8] - 2026-04-18
+
+### Added
+- `ReasoningEvent` dataclass for reasoning / thinking content; emitted from langchain-core `reasoning` and `thinking` content blocks, and from `think_tool` reflections. Carries a `source` field (`"content_block"` or `"think_tool"`) so UIs can distinguish provenance.
+- `DisplayEvent` dataclass for rich inline content (dataframes, images, plotly, html, json) from `display_inline`-style tools. Carries `display_type`, `data`, `title`, `status`, `error`, `tool_name`, `tool_call_id`, `node`, `namespace`.
+- `extract_reasoning_content()` helper in `extractors.messages` for parsing reasoning blocks from `AIMessageChunk.content`.
+- `UpdatesHandler._event_from_extraction()` routes extractor output to typed events; unknown `extracted_type` values still flow through `ToolExtractedEvent` for custom extractors.
+- README sections: "Reasoning & Thinking" and "Rich Inline Display" with typed matching examples.
+
+### Changed
+- `think_tool` output is now a `ReasoningEvent(source="think_tool")` instead of `ToolExtractedEvent(extracted_type="reflection")`. Legacy dict API (`stream_graph_updates`) still produces `{"chunk": text}` for backward compatibility.
+- `display_inline` tool output is now a `DisplayEvent` instead of `ToolExtractedEvent(extracted_type="display_inline")`.
+- `extract_message_content()` now skips reasoning blocks so they can be surfaced as `ReasoningEvent` separately.
+
+### Fixed
+- Removed dead `has_messages` variable in `_parse_v2`.
+
 ## [0.1.7] - 2026-04-18
 
 ### Added
