@@ -7,9 +7,10 @@ AIMessageChunk and metadata contains langgraph_node, langgraph_step, etc.
 """
 from typing import Any, Iterator
 
-from ..events import ContentEvent, StreamEvent
+from ..events import ContentEvent, ReasoningEvent, StreamEvent
 from ..extractors.messages import (
     extract_message_content,
+    extract_reasoning_content,
     clean_tool_dict_from_content,
     get_message_type_name,
 )
@@ -49,18 +50,18 @@ class MessagesHandler:
     def _process_ai_chunk(
         self, chunk: Any, metadata: dict
     ) -> Iterator[StreamEvent]:
-        """Process an AIMessageChunk for text content only.
+        """Process an AIMessageChunk for reasoning and text content.
 
-        Skips chunks that are tool-call-only (have tool_call_chunks or
-        tool_calls but no meaningful text). Also cleans any tool call
-        dict representations that leak into content strings.
+        Skips chunks that are tool-call-only. Emits ReasoningEvent for
+        reasoning/thinking content blocks (langchain-core standardized
+        format), then ContentEvent for any remaining text.
 
         Args:
             chunk: An AIMessageChunk object.
             metadata: Metadata dict with langgraph_node etc.
 
         Yields:
-            ContentEvent if the chunk has non-empty text content.
+            ReasoningEvent for reasoning blocks, ContentEvent for text.
         """
         # Skip chunks that carry tool call data — tool lifecycle is
         # handled by the updates handler in dual mode.
@@ -69,8 +70,24 @@ class MessagesHandler:
         if tool_call_chunks or tool_calls:
             return
 
-        content = extract_message_content(chunk)
+        node_name = None
+        agent_name = None
+        if isinstance(metadata, dict):
+            node_name = metadata.get("langgraph_node")
+            agent_name = metadata.get("lc_agent_name")
 
+        # Reasoning / thinking blocks — emitted before text so UI
+        # consumers can render the "thinking" indicator first.
+        reasoning = extract_reasoning_content(chunk)
+        if reasoning:
+            yield ReasoningEvent(
+                content=reasoning,
+                source="content_block",
+                node=node_name,
+                agent_name=agent_name,
+            )
+
+        content = extract_message_content(chunk)
         if not content:
             return
 
@@ -78,12 +95,6 @@ class MessagesHandler:
         content = clean_tool_dict_from_content(content)
         if not content:
             return
-
-        node_name = None
-        agent_name = None
-        if isinstance(metadata, dict):
-            node_name = metadata.get("langgraph_node")
-            agent_name = metadata.get("lc_agent_name")
 
         yield ContentEvent(
             content=content,

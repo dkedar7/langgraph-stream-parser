@@ -11,8 +11,10 @@ from .events import (
     CompleteEvent,
     ContentEvent,
     CustomEvent,
+    DisplayEvent,
     ErrorEvent,
     InterruptEvent,
+    ReasoningEvent,
     StreamEvent,
     ToolCallEndEvent,
     ToolCallStartEvent,
@@ -102,6 +104,36 @@ def _event_to_dict(event: StreamEvent) -> dict[str, Any] | None:
         case CustomEvent(data=data):
             return {
                 "custom": data,
+                "status": "streaming",
+            }
+
+        case ReasoningEvent(content=content):
+            # Preserves legacy behavior where think_tool reflections
+            # arrived as {"chunk": text}. Downstream code matching on
+            # "chunk" still works; new code can use "reasoning".
+            return {
+                "chunk": content,
+                "reasoning": content,
+                "status": "streaming",
+            }
+
+        case DisplayEvent(
+            display_type=display_type,
+            data=data,
+            title=title,
+            status=status,
+            error=error,
+            tool_name=tool_name,
+        ):
+            return {
+                "display": {
+                    "display_type": display_type,
+                    "data": data,
+                    "title": title,
+                    "status": status,
+                    "error": error,
+                    "tool": tool_name,
+                },
                 "status": "streaming",
             }
 

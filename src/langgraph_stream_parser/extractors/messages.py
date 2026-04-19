@@ -10,18 +10,19 @@ from typing import Any
 
 
 def extract_message_content(message: Any) -> str:
-    """Extract and convert message content to string.
+    """Extract and convert message text content to string.
 
     Handles different content formats:
         - String content (returned as-is)
-        - List of content blocks (text blocks joined)
+        - List of content blocks — reasoning/thinking blocks are
+          skipped so they can be surfaced as ReasoningEvent separately.
         - Other types (converted to string)
 
     Args:
         message: A LangChain message object with 'content' attribute.
 
     Returns:
-        Content as a string.
+        Text content as a string (reasoning blocks excluded).
     """
     if not hasattr(message, 'content'):
         return ""
@@ -31,16 +32,58 @@ def extract_message_content(message: Any) -> str:
     if isinstance(content, str):
         return content
     elif isinstance(content, list):
-        # Handle list of content blocks (e.g., [{"text": "...", "type": "text"}])
+        # Handle list of content blocks. Skip reasoning blocks — those
+        # are surfaced as ReasoningEvent separately.
         parts = []
         for block in content:
             if isinstance(block, dict):
+                btype = block.get("type")
+                if btype == "reasoning" or btype == "thinking":
+                    continue
                 parts.append(block.get("text", str(block)))
             else:
                 parts.append(str(block))
         return " ".join(parts)
     else:
         return str(content)
+
+
+def extract_reasoning_content(message: Any) -> str:
+    """Extract reasoning / thinking text from a message.
+
+    Returns concatenated text from reasoning blocks in the
+    langchain-core standardized format. Recognizes both ``type:
+    "reasoning"`` (standardized) and ``type: "thinking"`` (Anthropic).
+
+    Args:
+        message: A LangChain message object with 'content' attribute.
+
+    Returns:
+        Concatenated reasoning text, or empty string if none found.
+    """
+    if not hasattr(message, 'content'):
+        return ""
+
+    content = message.content
+    if not isinstance(content, list):
+        return ""
+
+    parts = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        btype = block.get("type")
+        if btype not in ("reasoning", "thinking"):
+            continue
+        text = (
+            block.get("reasoning")
+            or block.get("thinking")
+            or block.get("text")
+            or ""
+        )
+        if text:
+            parts.append(str(text))
+    return "".join(parts)
 
 
 def clean_tool_dict_from_content(content: str) -> str:

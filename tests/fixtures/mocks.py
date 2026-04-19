@@ -389,6 +389,39 @@ SUBGRAPH_MULTI_CHILD_MSG_WITH_AGENT = (
     (AIMessageChunk(content="Sub agent token"), MESSAGES_METADATA_WITH_AGENT),
 )
 
+# --- Reasoning content block fixtures ---
+# langchain-core standardized reasoning block (Anthropic thinking,
+# OpenAI reasoning summaries). Blocks are a list on AIMessageChunk.content.
+
+MESSAGES_CHUNK_REASONING_ONLY = (
+    AIMessageChunk(
+        content=[
+            {"type": "reasoning", "reasoning": "Let me think about this carefully..."}
+        ],
+    ),
+    MESSAGES_METADATA,
+)
+
+MESSAGES_CHUNK_REASONING_AND_TEXT = (
+    AIMessageChunk(
+        content=[
+            {"type": "reasoning", "reasoning": "First, I will analyze the input. "},
+            {"type": "text", "text": "The answer is 42."},
+        ],
+    ),
+    MESSAGES_METADATA,
+)
+
+# Anthropic-style "thinking" block (alternate type name)
+MESSAGES_CHUNK_THINKING_BLOCK = (
+    AIMessageChunk(
+        content=[
+            {"type": "thinking", "thinking": "I should search for recent data."}
+        ],
+    ),
+    MESSAGES_METADATA,
+)
+
 # --- v2 StreamPart fixtures ---
 # v2 chunks are dicts with {"type": str, "ns": tuple, "data": ...}
 

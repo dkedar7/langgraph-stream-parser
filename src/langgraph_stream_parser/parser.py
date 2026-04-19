@@ -522,13 +522,6 @@ class StreamParser:
         """
         updates_handler = self._create_updates_handler()
         messages_handler = self._create_messages_handler()
-        has_messages = False
-
-        # Two-pass approach: first scan to check if messages type is present
-        # would require buffering. Instead, we use a simpler approach:
-        # process all chunks, and if we see both updates and messages types,
-        # the user should use dual mode or accept potential content duplication.
-        # In practice, v2 streams with multiple modes will have distinct types.
 
         for chunk in stream:
             if not _is_v2_stream_part(chunk):

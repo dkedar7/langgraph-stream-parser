@@ -5,9 +5,11 @@ from typing import Iterator
 from langgraph_stream_parser import (
     StreamParser,
     ContentEvent,
+    ReasoningEvent,
     ToolCallStartEvent,
     ToolCallEndEvent,
     ToolExtractedEvent,
+    DisplayEvent,
     InterruptEvent,
     StateUpdateEvent,
     UsageEvent,
@@ -144,11 +146,10 @@ class TestStreamParserParse:
 
         events = list(parser.parse(stream))
 
-        extracted_events = [e for e in events if isinstance(e, ToolExtractedEvent)]
-        assert len(extracted_events) == 1
-        assert extracted_events[0].tool_name == "think_tool"
-        assert extracted_events[0].extracted_type == "reflection"
-        assert extracted_events[0].data == "I should search for more recent data."
+        reasoning_events = [e for e in events if isinstance(e, ReasoningEvent)]
+        assert len(reasoning_events) == 1
+        assert reasoning_events[0].source == "think_tool"
+        assert reasoning_events[0].content == "I should search for more recent data."
 
     def test_think_tool_string_content(self):
         parser = StreamParser()
@@ -156,9 +157,10 @@ class TestStreamParserParse:
 
         events = list(parser.parse(stream))
 
-        extracted_events = [e for e in events if isinstance(e, ToolExtractedEvent)]
-        assert len(extracted_events) == 1
-        assert "reflection" in extracted_events[0].data.lower() or "problem" in extracted_events[0].data.lower()
+        reasoning_events = [e for e in events if isinstance(e, ReasoningEvent)]
+        assert len(reasoning_events) == 1
+        assert reasoning_events[0].source == "think_tool"
+        assert "reflection" in reasoning_events[0].content.lower() or "problem" in reasoning_events[0].content.lower()
 
     def test_write_todos_extraction(self):
         parser = StreamParser()
@@ -377,12 +379,11 @@ class TestStreamParserDisplayInline:
         parser = StreamParser()
         events = list(parser.parse(make_stream([DISPLAY_INLINE_ARTIFACT_MESSAGE])))
 
-        extracted = [e for e in events if isinstance(e, ToolExtractedEvent)]
-        assert len(extracted) == 1
-        assert extracted[0].tool_name == "display_inline"
-        assert extracted[0].extracted_type == "display_inline"
-        assert extracted[0].data["display_type"] == "dataframe"
-        assert extracted[0].data["title"] == "Sales Data"
+        displays = [e for e in events if isinstance(e, DisplayEvent)]
+        assert len(displays) == 1
+        assert displays[0].tool_name == "display_inline"
+        assert displays[0].display_type == "dataframe"
+        assert displays[0].title == "Sales Data"
 
     def test_artifact_extraction_tool_end_has_stub(self):
         """ToolCallEndEvent.result should be the stub content, not the artifact."""
@@ -399,10 +400,10 @@ class TestStreamParserDisplayInline:
         parser = StreamParser()
         events = list(parser.parse(make_stream([DISPLAY_INLINE_CONTENT_MESSAGE])))
 
-        extracted = [e for e in events if isinstance(e, ToolExtractedEvent)]
-        assert len(extracted) == 1
-        assert extracted[0].data["display_type"] == "image"
-        assert extracted[0].data["title"] == "Chart"
+        displays = [e for e in events if isinstance(e, DisplayEvent)]
+        assert len(displays) == 1
+        assert displays[0].display_type == "image"
+        assert displays[0].title == "Chart"
 
 
 class TestStreamParserReset:

@@ -32,9 +32,11 @@ Legacy Dict-Based API:
 from .parser import StreamParser
 from .events import (
     ContentEvent,
+    ReasoningEvent,
     ToolCallStartEvent,
     ToolCallEndEvent,
     ToolExtractedEvent,
+    DisplayEvent,
     InterruptEvent,
     StateUpdateEvent,
     UsageEvent,
@@ -63,9 +65,11 @@ __all__ = [
     "StreamParser",
     # Event types
     "ContentEvent",
+    "ReasoningEvent",
     "ToolCallStartEvent",
     "ToolCallEndEvent",
     "ToolExtractedEvent",
+    "DisplayEvent",
     "InterruptEvent",
     "StateUpdateEvent",
     "UsageEvent",

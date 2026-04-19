@@ -8,7 +8,9 @@ from typing import Any, Iterator
 
 from ..events import (
     ContentEvent,
+    DisplayEvent,
     InterruptEvent,
+    ReasoningEvent,
     StateUpdateEvent,
     StreamEvent,
     ToolCallEndEvent,
@@ -236,6 +238,54 @@ class UpdatesHandler:
                 node=node_name,
             )
 
+    def _event_from_extraction(
+        self,
+        *,
+        tool_name: str | None,
+        tool_call_id: str | None,
+        extracted_type: str,
+        data: Any,
+    ) -> Iterator[StreamEvent]:
+        """Route extractor output to the appropriate typed event.
+
+        Known extracted_types map to first-class events (ReasoningEvent,
+        DisplayEvent). Everything else falls through to the generic
+        ToolExtractedEvent so user-registered extractors still work.
+        """
+        if extracted_type == "reflection":
+            # ThinkToolExtractor output. ``data`` is the reflection text.
+            yield ReasoningEvent(
+                content=str(data) if data is not None else "",
+                source="think_tool",
+            )
+        elif extracted_type == "display_inline":
+            # DisplayInlineExtractor output. ``data`` is a dict with
+            # display_type / data / title / status / error.
+            if isinstance(data, dict):
+                yield DisplayEvent(
+                    display_type=data.get("display_type", "unknown"),
+                    data=data.get("data"),
+                    title=data.get("title"),
+                    status=data.get("status", "success"),
+                    error=data.get("error"),
+                    tool_name=tool_name,
+                    tool_call_id=tool_call_id,
+                )
+            else:
+                # Malformed extraction — fall back to generic event.
+                yield ToolExtractedEvent(
+                    tool_name=tool_name,
+                    extracted_type=extracted_type,
+                    data=data,
+                )
+        else:
+            # Unknown extracted_type — emit generic event for user extractors.
+            yield ToolExtractedEvent(
+                tool_name=tool_name,
+                extracted_type=extracted_type,
+                data=data,
+            )
+
     def _process_tool_message(self, message: Any) -> Iterator[StreamEvent]:
         """Process a ToolMessage.
 
@@ -265,8 +315,9 @@ class UpdatesHandler:
             try:
                 extracted = extractor.extract(artifact if artifact is not None else content)
                 if extracted is not None:
-                    yield ToolExtractedEvent(
+                    yield from self._event_from_extraction(
                         tool_name=tool_name,
+                        tool_call_id=tool_call_id,
                         extracted_type=extractor.extracted_type,
                         data=extracted,
                     )

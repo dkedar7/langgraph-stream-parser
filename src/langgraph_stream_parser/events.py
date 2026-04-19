@@ -438,6 +438,109 @@ class DebugEvent:
 
 
 @dataclass
+class ReasoningEvent:
+    """Reasoning / thinking content from an AI message.
+
+    Emitted for the langchain-core standardized ``reasoning`` content
+    block (Anthropic thinking, OpenAI reasoning summaries) and for
+    ``think_tool`` reflections. Consumers can render reasoning
+    differently from final answer text (e.g., greyed out, collapsible).
+
+    Attributes:
+        content: The reasoning text.
+        source: Where the reasoning came from — "content_block" for
+            langchain-core reasoning blocks, "think_tool" for
+            ThinkToolExtractor output.
+        node: The graph node that produced the reasoning.
+        agent_name: The deep agent name, if from a subagent.
+        namespace: The subgraph namespace path, if from a subgraph.
+        timestamp: When the event was created.
+    """
+    content: str
+    source: Literal["content_block", "think_tool"] = "content_block"
+    node: str | None = None
+    agent_name: str | None = None
+    namespace: tuple[str, ...] | None = None
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict for web APIs."""
+        d: dict[str, Any] = {
+            "type": "reasoning",
+            "content": self.content,
+            "source": self.source,
+            "node": self.node,
+        }
+        if self.agent_name is not None:
+            d["agent_name"] = self.agent_name
+        if self.namespace is not None:
+            d["namespace"] = list(self.namespace)
+        return d
+
+
+@dataclass
+class DisplayEvent:
+    """Rich inline content from a ``display_inline``-style tool.
+
+    Emitted when a tool returns structured display metadata — typically
+    a serialized dataframe, matplotlib/plotly figure, image, or HTML
+    blob that the frontend should render inline rather than treat as
+    plain text.
+
+    Tool authors typically produce this by returning a JSON string with
+    ``{"display_type": str, "data": str, "title": str, "status": str}``
+    from a tool. The parser's ``DisplayInlineExtractor`` handles the
+    parse and yields this event.
+
+    Attributes:
+        display_type: The display kind — e.g., "dataframe", "image",
+            "plotly", "html", "json". Consumer-defined.
+        data: The serialized payload (HTML string, base64 image, plotly
+            JSON, etc.). Format depends on ``display_type``.
+        title: Optional display title.
+        status: "success" or "error".
+        error: Optional error message when ``status == "error"``.
+        tool_name: The tool that produced the display.
+        tool_call_id: The originating tool call ID.
+        node: The graph node that produced the event.
+        namespace: The subgraph namespace path, if from a subgraph.
+        timestamp: When the event was created.
+    """
+    display_type: str
+    data: Any
+    title: str | None = None
+    status: str = "success"
+    error: str | None = None
+    tool_name: str | None = None
+    tool_call_id: str | None = None
+    node: str | None = None
+    namespace: tuple[str, ...] | None = None
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict for web APIs."""
+        d: dict[str, Any] = {
+            "type": "display",
+            "display_type": self.display_type,
+            "data": self.data,
+            "status": self.status,
+        }
+        if self.title is not None:
+            d["title"] = self.title
+        if self.error is not None:
+            d["error"] = self.error
+        if self.tool_name is not None:
+            d["tool_name"] = self.tool_name
+        if self.tool_call_id is not None:
+            d["tool_call_id"] = self.tool_call_id
+        if self.node is not None:
+            d["node"] = self.node
+        if self.namespace is not None:
+            d["namespace"] = list(self.namespace)
+        return d
+
+
+@dataclass
 class CompleteEvent:
     """Stream completed successfully.
 
@@ -502,9 +605,11 @@ def event_to_dict(event: "StreamEvent") -> dict[str, Any]:
 # Union type for all events - useful for type hints
 StreamEvent = Union[
     ContentEvent,
+    ReasoningEvent,
     ToolCallStartEvent,
     ToolCallEndEvent,
     ToolExtractedEvent,
+    DisplayEvent,
     InterruptEvent,
     StateUpdateEvent,
     UsageEvent,
