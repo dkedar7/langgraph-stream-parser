@@ -43,9 +43,11 @@ for event in parser.parse(graph.stream(input_data, stream_mode="updates")):
 | Event | Description |
 |-------|-------------|
 | `ContentEvent` | Text content from AI messages. Includes `agent_name` when from a deep agent subagent. |
+| `ReasoningEvent` | Reasoning / thinking text — from langchain-core `reasoning` content blocks or `think_tool` reflections |
 | `ToolCallStartEvent` | Tool call initiated by AI |
 | `ToolCallEndEvent` | Tool call completed with result |
-| `ToolExtractedEvent` | Special content extracted from tool (e.g., reflections, todos) |
+| `ToolExtractedEvent` | Special content extracted from tool (e.g., todos, custom extractors) |
+| `DisplayEvent` | Rich inline content (dataframe, image, plotly, html, json) from `display_inline`-style tools |
 | `InterruptEvent` | Human-in-the-loop interrupt requiring decision |
 | `StateUpdateEvent` | Non-message state updates (opt-in) |
 | `UsageEvent` | Token usage metadata (input/output/total tokens) |
@@ -235,6 +237,60 @@ for event in parser.parse(stream):
         case CustomEvent(data=data):
             print(f"Progress: {data}")
 ```
+
+### Reasoning & Thinking
+
+Reasoning content arrives as a distinct `ReasoningEvent` so UIs can render it differently from the final answer (greyed out, collapsed, etc.). Two sources, same event type:
+
+```python
+for event in parser.parse(stream):
+    match event:
+        case ReasoningEvent(content=text, source="content_block"):
+            # From langchain-core reasoning blocks (Anthropic thinking,
+            # OpenAI reasoning summaries). Streamed token-by-token.
+            print(f"\033[90m{text}\033[0m", end="")  # grey
+        case ReasoningEvent(content=text, source="think_tool"):
+            # From the built-in think_tool ThinkToolExtractor.
+            print(f"💭 {text}")
+        case ContentEvent(content=text):
+            print(text, end="")
+```
+
+### Rich Inline Display
+
+For agents that need to show DataFrames, charts, images, or HTML in the transcript, use a `display_inline`-style tool. The parser recognizes the convention and emits a typed `DisplayEvent` — no stringified dict hacks.
+
+**Tool side** — return a JSON string with `display_type`, `data`, `title`, `status`:
+
+```python
+def show_dataframe(df_name: str) -> str:
+    import json
+    df = load(df_name)
+    return json.dumps({
+        "type": "display_inline",
+        "display_type": "dataframe",
+        "title": df_name,
+        "data": df.to_html(),       # or fig.to_json() for plotly,
+        "status": "success",         # base64 PNG for matplotlib, etc.
+    })
+```
+
+Configure your LangGraph tool registration with `name="display_inline"` (or register a custom `DisplayInlineExtractor` for a different name).
+
+**Consumer side** — match on `DisplayEvent`:
+
+```python
+for event in parser.parse(stream):
+    match event:
+        case DisplayEvent(display_type="dataframe", data=html, title=title):
+            ui.show_html(f"<h3>{title}</h3>{html}")
+        case DisplayEvent(display_type="plotly", data=plotly_json):
+            ui.show_plotly(json.loads(plotly_json))
+        case DisplayEvent(display_type=kind, data=data):
+            ui.show_generic(kind, data)
+```
+
+The `display_type` field is consumer-defined — any string the tool and UI agree on. Common values: `"dataframe"`, `"image"`, `"plotly"`, `"html"`, `"json"`.
 
 ### Configuration Options
 
