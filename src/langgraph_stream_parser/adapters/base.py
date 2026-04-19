@@ -13,9 +13,11 @@ from typing import Any, Callable
 from ..events import (
     StreamEvent,
     ContentEvent,
+    ReasoningEvent,
     ToolCallStartEvent,
     ToolCallEndEvent,
     ToolExtractedEvent,
+    DisplayEvent,
     InterruptEvent,
     StateUpdateEvent,
     UsageEvent,
@@ -309,6 +311,14 @@ class BaseAdapter(ABC):
 
             case ToolExtractedEvent():
                 self._display_items.append(("extraction", event))
+
+            case ReasoningEvent():
+                self._flush_current_message()
+                self._display_items.append(("reasoning", event))
+
+            case DisplayEvent():
+                self._flush_current_message()
+                self._display_items.append(("display", event))
 
             case InterruptEvent():
                 self._flush_current_message()
