@@ -283,6 +283,53 @@ AI_MESSAGE_WITH_USAGE = {
     }
 }
 
+# langchain-core 1.4 surfaces cache token counts via input_token_details.
+AI_MESSAGE_WITH_CACHED_USAGE = {
+    "agent": {
+        "messages": [
+            AIMessage(
+                content="Cached response.",
+                usage_metadata={
+                    "input_tokens": 1200,
+                    "output_tokens": 30,
+                    "total_tokens": 1230,
+                    "input_token_details": {
+                        "cache_read": 1100,
+                        "cache_creation": 50,
+                    },
+                }
+            )
+        ]
+    }
+}
+
+# langchain-core 1.4 server-tool blocks. These should be skipped by
+# text extraction (tool lifecycle handles them separately).
+AI_MESSAGE_WITH_SERVER_TOOL_BLOCKS = {
+    "agent": {
+        "messages": [
+            AIMessage(
+                content=[
+                    {"type": "text", "text": "Looking up the answer..."},
+                    {
+                        "type": "server_tool_call",
+                        "id": "stc_1",
+                        "name": "web_search",
+                        "args": {"query": "weather"},
+                    },
+                    {
+                        "type": "server_tool_result",
+                        "tool_call_id": "stc_1",
+                        "status": "success",
+                        "output": "75F and sunny",
+                    },
+                    {"type": "text", "text": " It is 75F."},
+                ],
+            )
+        ]
+    }
+}
+
 # --- Dual / Messages mode fixtures ---
 
 MESSAGES_METADATA = {"langgraph_node": "agent", "langgraph_step": 1}
@@ -387,6 +434,28 @@ SUBGRAPH_MULTI_CHILD_MSG_WITH_AGENT = (
     NAMESPACE_CHILD,
     "messages",
     (AIMessageChunk(content="Sub agent token"), MESSAGES_METADATA_WITH_AGENT),
+)
+
+# deepagents >= 0.6 stamps ls_agent_type="subagent" on subagent runs.
+MESSAGES_METADATA_SUBAGENT = {
+    "langgraph_node": "agent",
+    "langgraph_step": 2,
+    "lc_agent_name": "researcher",
+    "ls_agent_type": "subagent",
+}
+
+MESSAGES_CHUNK_FROM_SUBAGENT = (
+    AIMessageChunk(content="Subagent token"),
+    MESSAGES_METADATA_SUBAGENT,
+)
+
+MESSAGES_CHUNK_SUBAGENT_REASONING = (
+    AIMessageChunk(
+        content=[
+            {"type": "reasoning", "reasoning": "Subagent is thinking..."},
+        ],
+    ),
+    MESSAGES_METADATA_SUBAGENT,
 )
 
 # --- Reasoning content block fixtures ---
