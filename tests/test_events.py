@@ -147,12 +147,43 @@ class TestUsageEvent:
         assert event.input_tokens == 100
         assert event.output_tokens == 50
         assert event.total_tokens == 150
+        assert event.cache_read_tokens == 0
+        assert event.cache_creation_tokens == 0
         assert event.node is None
         assert isinstance(event.timestamp, datetime)
 
     def test_with_node(self):
         event = UsageEvent(input_tokens=10, output_tokens=5, total_tokens=15, node="agent")
         assert event.node == "agent"
+
+    def test_with_cache_tokens(self):
+        event = UsageEvent(
+            input_tokens=1000,
+            output_tokens=50,
+            total_tokens=1050,
+            cache_read_tokens=900,
+            cache_creation_tokens=80,
+        )
+        assert event.cache_read_tokens == 900
+        assert event.cache_creation_tokens == 80
+
+    def test_cache_tokens_in_to_dict(self):
+        event = UsageEvent(
+            input_tokens=1000,
+            output_tokens=50,
+            total_tokens=1050,
+            cache_read_tokens=900,
+            cache_creation_tokens=80,
+        )
+        d = event.to_dict()
+        assert d["cache_read_tokens"] == 900
+        assert d["cache_creation_tokens"] == 80
+
+    def test_cache_tokens_omitted_when_zero(self):
+        event = UsageEvent(input_tokens=10, output_tokens=5, total_tokens=15)
+        d = event.to_dict()
+        assert "cache_read_tokens" not in d
+        assert "cache_creation_tokens" not in d
 
 
 class TestCompleteEvent:
@@ -245,7 +276,8 @@ class TestToDict:
 
     def test_interrupt_allowed_decisions_default(self):
         event = InterruptEvent(action_requests=[], review_configs=[])
-        assert event.allowed_decisions == {"approve", "reject"}
+        # Default covers the full deepagents 0.6+ decision verb set.
+        assert event.allowed_decisions == {"approve", "reject", "edit", "respond"}
 
     def test_interrupt_build_decisions(self):
         event = InterruptEvent(
@@ -257,6 +289,7 @@ class TestToDict:
         assert all(d["type"] == "approve" for d in decisions)
 
     def test_interrupt_build_decisions_with_modifier(self):
+        """Edit decisions use the modern ``edited_action`` shape by default."""
         event = InterruptEvent(
             action_requests=[{"tool": "bash", "args": {"cmd": "rm -rf /"}}],
             review_configs=[],
@@ -265,7 +298,35 @@ class TestToDict:
             "edit", args_modifier=lambda args: {"cmd": "ls", "safe": True}
         )
         assert decisions[0]["type"] == "edit"
-        assert decisions[0]["args"] == {"cmd": "ls", "safe": True}
+        assert decisions[0]["edited_action"] == {
+            "name": "bash",
+            "args": {"cmd": "ls", "safe": True},
+        }
+
+    def test_interrupt_build_decisions_legacy_edit_shape(self):
+        """Opt-in to the legacy edit shape for older LangGraph runtimes."""
+        event = InterruptEvent(
+            action_requests=[{"tool": "bash", "args": {"cmd": "rm -rf /"}}],
+            review_configs=[],
+        )
+        decisions = event.build_decisions(
+            "edit",
+            args_modifier=lambda args: {"cmd": "ls"},
+            use_edited_action=False,
+        )
+        assert decisions[0] == {"type": "edit", "args": {"cmd": "ls"}}
+
+    def test_interrupt_build_decisions_respond(self):
+        """The respond decision packs the response text into args."""
+        event = InterruptEvent(
+            action_requests=[{"tool": "bash", "args": {"cmd": "ls"}}],
+            review_configs=[],
+        )
+        decisions = event.build_decisions("respond", response="Please rephrase.")
+        assert decisions[0] == {
+            "type": "respond",
+            "args": {"response": "Please rephrase."},
+        }
 
     def test_state_update_to_dict(self):
         event = StateUpdateEvent(node="agent", key="step", value=3)

@@ -9,20 +9,44 @@ import re
 from typing import Any
 
 
+# Block types in langchain-core 1.4 standard content blocks that are
+# NOT plain text and should not bleed into ContentEvent. Reasoning blocks
+# are surfaced via ReasoningEvent; tool/server-tool blocks are surfaced
+# via tool-lifecycle events; multimodal blocks are out of scope for
+# text content (consumers needing them should inspect the raw message).
+_NON_TEXT_BLOCK_TYPES = frozenset({
+    "reasoning",
+    "thinking",
+    "tool_call",
+    "tool_use",
+    "tool_call_chunk",
+    "server_tool_call",
+    "server_tool_call_chunk",
+    "server_tool_result",
+    "invalid_tool_call",
+    "image",
+    "audio",
+    "video",
+    "file",
+})
+
+
 def extract_message_content(message: Any) -> str:
     """Extract and convert message text content to string.
 
     Handles different content formats:
         - String content (returned as-is)
-        - List of content blocks — reasoning/thinking blocks are
-          skipped so they can be surfaced as ReasoningEvent separately.
+        - List of content blocks — only ``text`` / ``text-plain`` blocks
+          contribute to the returned string. Reasoning, tool-call, and
+          server-tool blocks are skipped (those are surfaced via
+          ReasoningEvent and tool-lifecycle events respectively).
         - Other types (converted to string)
 
     Args:
         message: A LangChain message object with 'content' attribute.
 
     Returns:
-        Text content as a string (reasoning blocks excluded).
+        Text content as a string (non-text blocks excluded).
     """
     if not hasattr(message, 'content'):
         return ""
@@ -32,15 +56,15 @@ def extract_message_content(message: Any) -> str:
     if isinstance(content, str):
         return content
     elif isinstance(content, list):
-        # Handle list of content blocks. Skip reasoning blocks — those
-        # are surfaced as ReasoningEvent separately.
         parts = []
         for block in content:
             if isinstance(block, dict):
                 btype = block.get("type")
-                if btype == "reasoning" or btype == "thinking":
+                if btype in _NON_TEXT_BLOCK_TYPES:
                     continue
-                parts.append(block.get("text", str(block)))
+                text = block.get("text")
+                if text:
+                    parts.append(text)
             else:
                 parts.append(str(block))
         return " ".join(parts)

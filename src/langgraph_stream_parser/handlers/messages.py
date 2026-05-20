@@ -72,9 +72,12 @@ class MessagesHandler:
 
         node_name = None
         agent_name = None
+        is_subagent = False
         if isinstance(metadata, dict):
             node_name = metadata.get("langgraph_node")
             agent_name = metadata.get("lc_agent_name")
+            # deepagents >= 0.6 tags subagent runs with ls_agent_type
+            is_subagent = metadata.get("ls_agent_type") == "subagent"
 
         # Reasoning / thinking blocks — emitted before text so UI
         # consumers can render the "thinking" indicator first.
@@ -85,6 +88,7 @@ class MessagesHandler:
                 source="content_block",
                 node=node_name,
                 agent_name=agent_name,
+                is_subagent=is_subagent,
             )
 
         content = extract_message_content(chunk)
@@ -101,4 +105,5 @@ class MessagesHandler:
             role="assistant",
             node=node_name,
             agent_name=agent_name,
+            is_subagent=is_subagent,
         )

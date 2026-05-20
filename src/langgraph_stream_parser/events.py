@@ -19,6 +19,9 @@ class ContentEvent:
         role: The role of the message sender ("assistant" or "human").
         node: The name of the graph node that produced this content.
         agent_name: The deep agent name from ``lc_agent_name`` metadata.
+        is_subagent: True when ``ls_agent_type == "subagent"`` was set on
+            the run metadata (deepagents >= 0.6). Useful when the chunk
+            comes from a subagent but ``agent_name`` is not set.
         namespace: The subgraph namespace path, if from a subgraph.
         timestamp: When the event was created.
     """
@@ -26,6 +29,7 @@ class ContentEvent:
     role: Literal["assistant", "human"] = "assistant"
     node: str | None = None
     agent_name: str | None = None
+    is_subagent: bool = False
     namespace: tuple[str, ...] | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
@@ -39,6 +43,8 @@ class ContentEvent:
         }
         if self.agent_name is not None:
             d["agent_name"] = self.agent_name
+        if self.is_subagent:
+            d["is_subagent"] = True
         if self.namespace is not None:
             d["namespace"] = list(self.namespace)
         return d
@@ -194,39 +200,62 @@ class InterruptEvent:
 
     @property
     def allowed_decisions(self) -> set[str]:
-        """Get the set of allowed decision types from review configs."""
+        """Get the set of allowed decision types from review configs.
+
+        Defaults to ``{"approve", "reject", "edit", "respond"}`` when no
+        review configs are present — this matches the deepagents 0.6+
+        decision verb set.
+        """
         allowed = set()
         for config in self.review_configs:
             allowed.update(config.get("allowed_decisions", []))
         if not allowed:
-            allowed = {"approve", "reject"}
+            allowed = {"approve", "reject", "edit", "respond"}
         return allowed
 
     def build_decisions(
         self,
         decision_type: str,
         args_modifier: Any = None,
+        *,
+        response: str | None = None,
+        use_edited_action: bool = True,
     ) -> list[dict[str, Any]]:
         """Build decision list for resuming from this interrupt.
 
         Args:
-            decision_type: The decision type (e.g., "approve", "reject", "edit").
-            args_modifier: Optional function to modify args for "edit" decisions.
-                Takes original args dict and returns modified args dict.
+            decision_type: The decision type — one of ``"approve"``,
+                ``"reject"``, ``"edit"``, or ``"respond"``.
+            args_modifier: Optional function to modify args for "edit"
+                decisions. Takes original args dict and returns modified
+                args dict.
+            response: Text reply for ``"respond"`` decisions. Sent back
+                to the agent as the user's response in place of the
+                tool call.
+            use_edited_action: When True (default, LangGraph >= 1.1 /
+                deepagents >= 0.5 shape), edit decisions emit
+                ``{"type": "edit", "edited_action": {"name", "args"}}``.
+                When False, the legacy ``{"type": "edit", "args": ...}``
+                shape is emitted for older runtimes.
 
         Returns:
             List of decision dicts ready for create_resume_input().
+            Order matches ``action_requests`` — required by the LangGraph
+            interrupt API.
 
         Example:
             # Approve all actions
             decisions = interrupt.build_decisions("approve")
-            resume_input = create_resume_input(decisions=decisions)
 
-            # Edit args before approval
-            def modify(args):
-                args["safe_mode"] = True
-                return args
-            decisions = interrupt.build_decisions("edit", args_modifier=modify)
+            # Edit args before approval (modern shape)
+            decisions = interrupt.build_decisions(
+                "edit", args_modifier=lambda a: {**a, "safe": True}
+            )
+
+            # Reply with text instead of running the tool
+            decisions = interrupt.build_decisions(
+                "respond", response="Please rephrase that."
+            )
         """
         decisions = []
         for action in self.action_requests:
@@ -234,7 +263,17 @@ class InterruptEvent:
 
             if decision_type == "edit" and args_modifier is not None:
                 original_args = action.get("args", {})
-                decision["args"] = args_modifier(original_args)
+                modified_args = args_modifier(original_args)
+                if use_edited_action:
+                    tool_name = action.get("tool") or action.get("name")
+                    decision["edited_action"] = {
+                        "name": tool_name,
+                        "args": modified_args,
+                    }
+                else:
+                    decision["args"] = modified_args
+            elif decision_type == "respond" and response is not None:
+                decision["args"] = {"response": response}
 
             decisions.append(decision)
 
@@ -244,18 +283,15 @@ class InterruptEvent:
         self,
         decision_type: str,
         args_modifier: Any = None,
+        *,
+        response: str | None = None,
+        use_edited_action: bool = True,
     ) -> Any:
         """Create resume input to continue from this interrupt.
 
-        This is a convenience method that combines build_decisions() and
-        create_resume_input() into a single call.
-
-        Args:
-            decision_type: The decision type (e.g., "approve", "reject", "edit").
-            args_modifier: Optional function to modify args for "edit" decisions.
-
-        Returns:
-            A LangGraph Command object ready to pass to graph.stream().
+        Convenience wrapper around ``build_decisions()`` +
+        ``create_resume_input()``. See ``build_decisions()`` for the
+        full parameter set.
 
         Example:
             # Approve and resume in one call
@@ -266,7 +302,12 @@ class InterruptEvent:
         # Import here to avoid circular dependency
         from .resume import create_resume_input
 
-        decisions = self.build_decisions(decision_type, args_modifier)
+        decisions = self.build_decisions(
+            decision_type,
+            args_modifier,
+            response=response,
+            use_edited_action=use_edited_action,
+        )
         return create_resume_input(decisions=decisions)
 
     def to_dict(self) -> dict[str, Any]:
@@ -327,6 +368,11 @@ class UsageEvent:
         input_tokens: Number of input (prompt) tokens.
         output_tokens: Number of output (completion) tokens.
         total_tokens: Sum of input and output tokens.
+        cache_read_tokens: Cached prompt tokens read (from
+            ``input_token_details.cache_read``). 0 when unavailable.
+        cache_creation_tokens: Tokens used to create a cache entry
+            (from ``input_token_details.cache_creation``). 0 when
+            unavailable.
         node: The name of the graph node that produced this usage.
         namespace: The subgraph namespace path, if from a subgraph.
         timestamp: When the event was created.
@@ -334,6 +380,8 @@ class UsageEvent:
     input_tokens: int
     output_tokens: int
     total_tokens: int
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
     node: str | None = None
     namespace: tuple[str, ...] | None = None
     timestamp: datetime = field(default_factory=datetime.now)
@@ -347,6 +395,10 @@ class UsageEvent:
             "total_tokens": self.total_tokens,
             "node": self.node,
         }
+        if self.cache_read_tokens:
+            d["cache_read_tokens"] = self.cache_read_tokens
+        if self.cache_creation_tokens:
+            d["cache_creation_tokens"] = self.cache_creation_tokens
         if self.namespace is not None:
             d["namespace"] = list(self.namespace)
         return d
@@ -453,6 +505,8 @@ class ReasoningEvent:
             ThinkToolExtractor output.
         node: The graph node that produced the reasoning.
         agent_name: The deep agent name, if from a subagent.
+        is_subagent: True when ``ls_agent_type == "subagent"`` was set
+            on the run metadata (deepagents >= 0.6).
         namespace: The subgraph namespace path, if from a subgraph.
         timestamp: When the event was created.
     """
@@ -460,6 +514,7 @@ class ReasoningEvent:
     source: Literal["content_block", "think_tool"] = "content_block"
     node: str | None = None
     agent_name: str | None = None
+    is_subagent: bool = False
     namespace: tuple[str, ...] | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
@@ -473,6 +528,8 @@ class ReasoningEvent:
         }
         if self.agent_name is not None:
             d["agent_name"] = self.agent_name
+        if self.is_subagent:
+            d["is_subagent"] = True
         if self.namespace is not None:
             d["namespace"] = list(self.namespace)
         return d
