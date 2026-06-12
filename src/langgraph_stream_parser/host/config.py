@@ -1,21 +1,30 @@
-"""Shared ``DEEPAGENT_*`` configuration for hosts.
+"""Shared ``LANGSTAGE_*`` configuration for hosts.
 
 ``HostConfig`` holds the keys every host has in common (agent spec, workspace
 root, bind/title basics) and resolves them from one layered chain:
 
-    defaults  <  deepagents.toml  <  DEEPAGENT_* env vars  <  explicit overrides
+    defaults  <  langstage.toml  <  LANGSTAGE_* env vars  <  explicit overrides
 
 Host-specific keys (theme, auth, model, Jupyter token, ...) belong in each
 host's own subclass — drift *below* the shared core is fine — but every host
 gets the same resolution order, the same TOML files, and the same env-var
 names, so there's one place to look.
 
+Legacy vocabulary (the pre-LangStage names) still works everywhere as a
+deprecated fallback: ``DEEPAGENT_*`` env vars, project ``deepagents.toml``,
+global ``~/.deepagents/config.toml``, and ``DEEPAGENTS_CONFIG_HOME``. The
+canonical names win when both are set; using only the legacy env names emits
+a once-per-var ``DeprecationWarning``. Moving the global config out of
+``~/.deepagents/`` also exits the schema collision with LangChain's dcode,
+which owns that directory now.
+
 Discoverability: ``HostConfig.resolve().describe()`` (or
 ``python -m langgraph_stream_parser.host``) prints each value, where it came
 from, and the env var / TOML key that sets it — so you never have to remember
-whether it's ``DEEPAGENT_SPEC`` or ``DEEPAGENT_AGENT_SPEC`` (it's the latter).
+the variable names.
 """
 import os
+import warnings
 from dataclasses import MISSING, dataclass, fields, replace
 from pathlib import Path
 from typing import Any, Callable, ClassVar
@@ -28,8 +37,40 @@ except ModuleNotFoundError:  # pragma: no cover - 3.10 path
     except ModuleNotFoundError:
         _tomllib = None  # type: ignore
 
-GLOBAL_TOML = Path.home() / ".deepagents" / "config.toml"
-PROJECT_TOML = "deepagents.toml"
+GLOBAL_TOML = Path.home() / ".langstage" / "config.toml"
+PROJECT_TOML = "langstage.toml"
+# Pre-rename locations, still honoured as fallbacks.
+LEGACY_GLOBAL_TOML = Path.home() / ".deepagents" / "config.toml"
+LEGACY_PROJECT_TOML = "deepagents.toml"
+
+_CANONICAL_ENV_PREFIX = "LANGSTAGE"
+_LEGACY_ENV_PREFIX = "DEEPAGENT"
+
+_warned_legacy_env: set[str] = set()
+
+
+def _env_pair(declared: str) -> tuple[str, str]:
+    """Return ``(canonical, legacy)`` env-var names for a declared name.
+
+    Hosts may declare either spelling in their ``_ENV`` maps during the
+    rename transition; both resolve, canonical wins.
+    """
+    if declared.startswith(_CANONICAL_ENV_PREFIX):
+        return declared, _LEGACY_ENV_PREFIX + declared[len(_CANONICAL_ENV_PREFIX):]
+    if declared.startswith(_LEGACY_ENV_PREFIX):
+        return _CANONICAL_ENV_PREFIX + declared[len(_LEGACY_ENV_PREFIX):], declared
+    return declared, declared
+
+
+def _warn_legacy_env(legacy: str, canonical: str) -> None:
+    if legacy in _warned_legacy_env:
+        return
+    _warned_legacy_env.add(legacy)
+    warnings.warn(
+        f"{legacy} is deprecated; use {canonical}.",
+        DeprecationWarning,
+        stacklevel=4,
+    )
 
 
 def _env_bool(value: str | None, default: bool = False) -> bool:
@@ -43,17 +84,27 @@ def _env_bool(value: str | None, default: bool = False) -> bool:
 
 
 def _global_toml_path() -> Path:
-    override = os.getenv("DEEPAGENTS_CONFIG_HOME")
-    return (Path(override).expanduser() / "config.toml") if override else GLOBAL_TOML
+    override = os.getenv("LANGSTAGE_CONFIG_HOME") or os.getenv("DEEPAGENTS_CONFIG_HOME")
+    if override:
+        return Path(override).expanduser() / "config.toml"
+    # New home wins when present; otherwise fall back to the legacy location
+    # (which load_toml_config skips anyway if the file doesn't exist).
+    return GLOBAL_TOML if GLOBAL_TOML.is_file() else LEGACY_GLOBAL_TOML
 
 
 def _find_project_toml(start: Path | None = None) -> Path | None:
-    """Walk up from ``start`` (or cwd) looking for ``deepagents.toml``."""
+    """Walk up from ``start`` (or cwd) looking for ``langstage.toml``.
+
+    Checks ``langstage.toml`` then legacy ``deepagents.toml`` in each
+    directory, so the nearest file wins and the new name wins within a
+    directory.
+    """
     here = (start or Path.cwd()).resolve()
     for directory in (here, *here.parents):
-        candidate = directory / PROJECT_TOML
-        if candidate.is_file():
-            return candidate
+        for fname in (PROJECT_TOML, LEGACY_PROJECT_TOML):
+            candidate = directory / fname
+            if candidate.is_file():
+                return candidate
     return None
 
 
@@ -75,11 +126,13 @@ def _read_toml(path: Path) -> dict:
 
 
 def load_toml_config(start: Path | None = None) -> tuple[dict, list[Path]]:
-    """Load + deep-merge the global and project ``deepagents.toml`` files.
+    """Load + deep-merge the global and project ``langstage.toml`` files.
 
-    Global is ``~/.deepagents/config.toml`` (override the dir with
-    ``DEEPAGENTS_CONFIG_HOME``); project is the nearest ``deepagents.toml`` at
-    or above ``start``/cwd. Project wins on conflicts. Returns
+    Global is ``~/.langstage/config.toml`` (override the dir with
+    ``LANGSTAGE_CONFIG_HOME``; legacy ``~/.deepagents/config.toml`` and
+    ``DEEPAGENTS_CONFIG_HOME`` still work as fallbacks); project is the
+    nearest ``langstage.toml`` — or legacy ``deepagents.toml`` — at or above
+    ``start``/cwd. Project wins on conflicts. Returns
     ``(merged_config, sources_used)``; ``({}, [])`` if no TOML reader is
     available (Python 3.10 without ``tomli``).
     """
@@ -120,28 +173,30 @@ class HostConfig:
         @dataclass
         class WebConfig(HostConfig):
             theme: str = "auto"
-            _ENV = {"theme": ("DEEPAGENT_THEME", str)}
+            _ENV = {"theme": ("LANGSTAGE_THEME", str)}
             _TOML = {"theme": "ui.theme"}
 
     ``resolve()`` merges the maps across the MRO, so the subclass inherits all
     of ``HostConfig``'s keys and adds its own.
     """
 
-    agent_spec: str | None = None     # DEEPAGENT_AGENT_SPEC ("path.py:var")
-    workspace_root: Path = Path(".")  # DEEPAGENT_WORKSPACE_ROOT
-    host: str = "localhost"           # DEEPAGENT_HOST
-    port: int = 8050                  # DEEPAGENT_PORT
-    debug: bool = False               # DEEPAGENT_DEBUG
-    title: str = "Deep Agent"         # DEEPAGENT_TITLE
+    agent_spec: str | None = None     # LANGSTAGE_AGENT_SPEC ("path.py:var")
+    workspace_root: Path = Path(".")  # LANGSTAGE_WORKSPACE_ROOT
+    host: str = "localhost"           # LANGSTAGE_HOST
+    port: int = 8050                  # LANGSTAGE_PORT
+    debug: bool = False               # LANGSTAGE_DEBUG
+    title: str = "LangStage"          # LANGSTAGE_TITLE
 
-    # field -> (DEEPAGENT_* env var, caster). DEEPAGENT_AGENT_SPEC is canonical.
+    # field -> (env var, caster). Canonical names are LANGSTAGE_*; the
+    # matching DEEPAGENT_* legacy names resolve as deprecated fallbacks
+    # (see _env_pair).
     _ENV: ClassVar[dict[str, tuple[str, Callable[[str], Any]]]] = {
-        "agent_spec": ("DEEPAGENT_AGENT_SPEC", str),
-        "workspace_root": ("DEEPAGENT_WORKSPACE_ROOT", Path),
-        "host": ("DEEPAGENT_HOST", str),
-        "port": ("DEEPAGENT_PORT", int),
-        "debug": ("DEEPAGENT_DEBUG", _env_bool),
-        "title": ("DEEPAGENT_TITLE", str),
+        "agent_spec": ("LANGSTAGE_AGENT_SPEC", str),
+        "workspace_root": ("LANGSTAGE_WORKSPACE_ROOT", Path),
+        "host": ("LANGSTAGE_HOST", str),
+        "port": ("LANGSTAGE_PORT", int),
+        "debug": ("LANGSTAGE_DEBUG", _env_bool),
+        "title": ("LANGSTAGE_TITLE", str),
     }
     # field -> dotted key in deepagents.toml
     _TOML: ClassVar[dict[str, str]] = {
@@ -226,10 +281,17 @@ class HostConfig:
 
             if name in env_map:
                 var, caster = env_map[name]
-                ev = env.get(var)
+                canonical, legacy = _env_pair(var)
+                ev = env.get(canonical)
+                used = canonical
+                if ev is None or ev == "":
+                    ev = env.get(legacy)
+                    used = legacy
+                    if ev not in (None, "") and legacy != canonical:
+                        _warn_legacy_env(legacy, canonical)
                 if ev is not None and ev != "":
                     val = caster(ev)
-                    src = f"env:{var}"
+                    src = f"env:{used}"
 
             if name in overrides:
                 val = overrides[name]
@@ -270,7 +332,11 @@ class HostConfig:
             origin = src.get(f.name, "default")
             hints = []
             if f.name in env_map:
-                hints.append(f"env: {env_map[f.name][0]}")
+                canonical, legacy = _env_pair(env_map[f.name][0])
+                env_hint = f"env: {canonical}"
+                if legacy != canonical:
+                    env_hint += f" (legacy {legacy})"
+                hints.append(env_hint)
             if f.name in toml_map:
                 hints.append(f"toml: {toml_map[f.name]}")
             hint = f"   ({', '.join(hints)})" if hints else ""
@@ -280,7 +346,7 @@ class HostConfig:
         if toml_paths:
             lines.append("  TOML read from: " + ", ".join(str(p) for p in toml_paths))
         else:
-            lines.append("  TOML: no deepagents.toml found")
+            lines.append("  TOML: no langstage.toml (or legacy deepagents.toml) found")
         return "\n".join(lines)
 
 

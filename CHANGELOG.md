@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.3.0] - 2026-06-10
+
+The host family is renamed to **LangStage** ("every stage for your LangGraph agent"); this package keeps its name as the shared core.
+
+### Added
+- **`LANGSTAGE_*` is the canonical config vocabulary**: `LANGSTAGE_AGENT_SPEC` etc. env vars, project `langstage.toml`, global `~/.langstage/config.toml`, and `LANGSTAGE_CONFIG_HOME`. The legacy names (`DEEPAGENT_*`, `deepagents.toml`, `~/.deepagents/config.toml`, `DEEPAGENTS_CONFIG_HOME`) still resolve everywhere as deprecated fallbacks — canonical wins when both are set; legacy env use emits a once-per-var `DeprecationWarning`. Moving the global config out of `~/.deepagents/` also exits the schema collision with LangChain's dcode, which owns that directory.
+- Host subclasses may declare either spelling in their `_ENV` maps; both names resolve (`_env_pair` derivation), so downstream hosts need no immediate change.
+
+### Changed
+- `HostConfig.title` default: `"Deep Agent"` → `"LangStage"`.
+- `describe()` shows both vocabularies per field (`env: LANGSTAGE_X (legacy DEEPAGENT_X)`).
+- README family table updated to the LangStage package names.
+
+## [0.2.2] - 2026-06-10
+
+### Added
+- `demo.create_stub_agent()` / `langgraph_stream_parser.demo.stub:graph` — the keyless, deterministic echo agent behind every surface's `--demo` mode. Lazy imports; base install stays dependency-free.
+
+## [0.2.1] - 2026-06-08
+
+### Added
+- `GenericToolExtractor` + `default_extractor` fallback for unknown tools (#16).
+- Tag-driven Release workflow (#17).
+
 ## [0.2.0] - 2026-06-02
 
 Repositions langgraph-stream-parser as the **shared runtime substrate** for the deep-agent host family (`cowork-dash`, `deepagent-lab`, `deepagent-code`, `deepagent-vscode`).

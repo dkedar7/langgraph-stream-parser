@@ -67,7 +67,7 @@ class TestHostConfig:
         assert cfg.host == "localhost"
         assert cfg.port == 8050
         assert cfg.debug is False
-        assert cfg.title == "Deep Agent"
+        assert cfg.title == "LangStage"
 
     def test_from_env(self, monkeypatch):
         monkeypatch.setenv("DEEPAGENT_AGENT_SPEC", "agent.py:graph")

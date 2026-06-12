@@ -1,7 +1,7 @@
 """A keyless, deterministic stub agent — the engine behind every ``--demo`` mode.
 
-Every deep-agent surface (cowork-dash, deepagent-code, deepagent-lab,
-deepagent-vscode) offers a demo mode so a new user can see the surface working
+Every LangStage surface (langstage, langstage-cli, langstage-jupyter,
+langstage-vscode) offers a demo mode so a new user can see the surface working
 before configuring a real agent or any API key. This module is the single
 shared implementation: a real compiled LangGraph graph with a checkpointer,
 streaming token-by-token through the exact same parser path as a production
@@ -9,7 +9,7 @@ agent — but the "model" is a local echo, so it needs no network and no keys.
 
 Point any surface at it with the standard spec string::
 
-    DEEPAGENT_AGENT_SPEC=langgraph_stream_parser.demo.stub:graph
+    LANGSTAGE_AGENT_SPEC=langgraph_stream_parser.demo.stub:graph
 
 or build a customized one in code::
 
