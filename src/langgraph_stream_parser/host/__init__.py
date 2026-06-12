@@ -1,8 +1,9 @@
-"""Host conventions shared across deep-agent surfaces.
+"""Host conventions shared across the LangStage surfaces.
 
-Agent-spec loading, the shared ``DEEPAGENT_*`` config schema, and a workspace
-wrapper — the plumbing every host (``cowork-dash``, ``deepagent-lab``,
-``deepagent-code``, ``deepagent-vscode``) needs but used to reimplement.
+Agent-spec loading, the shared ``LANGSTAGE_*`` config schema (legacy
+``DEEPAGENT_*`` still resolves), and a workspace wrapper — the plumbing every
+host (``langstage``, ``langstage-jupyter``, ``langstage-cli``,
+``langstage-vscode``) needs but used to reimplement.
 """
 from .config import HostConfig, load_toml_config
 from .loader import load_agent_spec

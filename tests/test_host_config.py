@@ -111,6 +111,85 @@ class TestSubclass:
         assert "DEEPAGENT_THEME" in cfg.describe()
 
 
+class TestLangstageVocabulary:
+    """Canonical LANGSTAGE_* / langstage.toml with deprecated legacy fallbacks."""
+
+    def test_canonical_env_resolves(self, isolated_global, tmp_path):
+        cfg = HostConfig.resolve(
+            env={"LANGSTAGE_AGENT_SPEC": "a.py:g", "LANGSTAGE_PORT": "9100"},
+            toml_start=tmp_path,
+        )
+        assert cfg.agent_spec == "a.py:g"
+        assert cfg.port == 9100
+        assert cfg.sources["agent_spec"] == "env:LANGSTAGE_AGENT_SPEC"
+
+    def test_canonical_beats_legacy(self, isolated_global, tmp_path):
+        cfg = HostConfig.resolve(
+            env={"LANGSTAGE_PORT": "1111", "DEEPAGENT_PORT": "2222"},
+            toml_start=tmp_path,
+        )
+        assert cfg.port == 1111
+        assert cfg.sources["port"] == "env:LANGSTAGE_PORT"
+
+    def test_legacy_env_warns_once(self, isolated_global, tmp_path):
+        import langgraph_stream_parser.host.config as config_mod
+
+        config_mod._warned_legacy_env.discard("DEEPAGENT_TITLE")
+        with pytest.warns(DeprecationWarning, match="LANGSTAGE_TITLE"):
+            HostConfig.resolve(env={"DEEPAGENT_TITLE": "Old"}, toml_start=tmp_path)
+
+    def test_langstage_toml_preferred_in_same_dir(self, isolated_global, tmp_path):
+        (tmp_path / "deepagents.toml").write_text("[server]\nport = 1000\n")
+        (tmp_path / "langstage.toml").write_text("[server]\nport = 2000\n")
+        cfg = HostConfig.resolve(env={}, toml_start=tmp_path)
+        assert cfg.port == 2000
+
+    def test_legacy_toml_still_read(self, isolated_global, tmp_path):
+        (tmp_path / "deepagents.toml").write_text("[server]\nport = 1234\n")
+        cfg = HostConfig.resolve(env={}, toml_start=tmp_path)
+        assert cfg.port == 1234
+
+    def test_nearest_toml_wins_across_dirs(self, isolated_global, tmp_path):
+        # langstage.toml in the parent must NOT beat deepagents.toml in cwd.
+        (tmp_path / "langstage.toml").write_text("[server]\nport = 1000\n")
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "deepagents.toml").write_text("[server]\nport = 2000\n")
+        cfg = HostConfig.resolve(env={}, toml_start=sub)
+        assert cfg.port == 2000
+
+    def test_langstage_config_home_override(self, tmp_path, monkeypatch):
+        gdir = tmp_path / "newhome"
+        gdir.mkdir()
+        (gdir / "config.toml").write_text("[server]\nport = 4321\n")
+        monkeypatch.delenv("DEEPAGENTS_CONFIG_HOME", raising=False)
+        monkeypatch.setenv("LANGSTAGE_CONFIG_HOME", str(gdir))
+        cfg = HostConfig.resolve(env={}, toml_start=tmp_path)
+        assert cfg.port == 4321
+
+    def test_describe_shows_both_vocabularies(self, isolated_global, tmp_path):
+        text = HostConfig.resolve(env={}, toml_start=tmp_path).describe()
+        assert "LANGSTAGE_AGENT_SPEC" in text
+        assert "legacy DEEPAGENT_AGENT_SPEC" in text
+
+    def test_subclass_legacy_declaration_resolves_canonical_name(
+        self, isolated_global, tmp_path
+    ):
+        """A host still declaring DEEPAGENT_* in its _ENV map picks up the
+        LANGSTAGE_* var without any subclass change."""
+        from dataclasses import dataclass
+        from typing import ClassVar
+
+        @dataclass
+        class OldHost(HostConfig):
+            theme: str = "auto"
+            _ENV: ClassVar[dict] = {"theme": ("DEEPAGENT_THEME", str)}
+
+        cfg = OldHost.resolve(env={"LANGSTAGE_THEME": "dark"}, toml_start=tmp_path)
+        assert cfg.theme == "dark"
+        assert cfg.sources["theme"] == "env:LANGSTAGE_THEME"
+
+
 class TestFromEnvBackCompat:
     def test_from_env_skips_toml(self, isolated_global, tmp_path, monkeypatch):
         _toml(tmp_path, "[server]\nport = 1234\n")
