@@ -9,6 +9,9 @@ Adopt **AG-UI** for the wire (see `docs/adr/0001-adopt-ag-ui-for-the-wire.md`).
 - **`langstage-agui` console script** (and `python -m langgraph_stream_parser.agui`) — `langstage-agui --agent <spec>` / `--demo` serves any agent spec over AG-UI. The agent spec resolves through the shared host config chain.
 - **`[agui]` extra** — `ag-ui-langgraph[fastapi]` + `uvicorn`.
 
+### Changed
+- **Requires Python ≥ 3.11** (was ≥ 3.10). The AG-UI adapter stack (`ag-ui-langgraph` → modern `langchain`/`langgraph`) does not stream correctly under 3.10, and the whole LangStage surface family already requires 3.11+. Dropped 3.10 from CI and classifiers.
+
 ### Notes
 - This is additive. The typed-event layer (`StreamParser`, `event_to_dict`, the extractors) is unchanged and still backs the existing surfaces; per the ADR it becomes legacy/optional and surfaces migrate to AG-UI incrementally. The host layer (`HostConfig`, `load_agent_spec`, demo) is the durable core.
 
