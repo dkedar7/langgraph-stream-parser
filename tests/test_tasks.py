@@ -21,10 +21,18 @@ from langgraph_stream_parser.tasks import (
     REVIEW_NEEDED,
     InMemoryTaskStore,
     TaskRunner,
+    current_task_id,
     get_runner,
     set_runner,
 )
 from langgraph_stream_parser.tasks.store import now_iso
+from langgraph_stream_parser.tasks.tools import (
+    cancel_async_task,
+    check_async_task,
+    list_async_tasks,
+    start_async_task,
+    update_async_task,
+)
 
 from .fixtures.mocks import (
     AI_MESSAGE_WITH_TOOL_CALLS,
@@ -419,3 +427,103 @@ class TestRunnerHardening:
             assert row["result"]  # tokens concatenated into the final text
         finally:
             await runner.shutdown()
+
+
+# ── 6. Slice 2: event transcript, followup, delegation tools ─────────
+
+
+class TestEventTranscript:
+    async def test_events_streamed_to_store(self):
+        adapter = SessionAdapter(graph=MockGraph([[SIMPLE_AI_MESSAGE]]), stream_mode="updates")
+        store = InMemoryTaskStore()
+        runner = TaskRunner(adapter, store, concurrency=1, poll_interval=0.05)
+        await runner.start()
+        try:
+            tid = await runner.enqueue(title="t", prompt="hi")
+            await _wait_state(store, tid, DONE)
+            events = await store.get_events(tid)
+            types = [e.get("type") for e in events]
+            assert "content" in types
+            assert types[-1] == "complete"  # terminal event recorded last
+        finally:
+            await runner.shutdown()
+
+    async def test_followup_reruns_thread(self):
+        graph = MockGraph([[SIMPLE_AI_MESSAGE], [SIMPLE_AI_MESSAGE]])
+        adapter = SessionAdapter(graph=graph, stream_mode="updates")
+        store = InMemoryTaskStore()
+        runner = TaskRunner(adapter, store, concurrency=1, poll_interval=0.05)
+        await runner.start()
+        try:
+            tid = await runner.enqueue(title="t", prompt="hi")
+            await _wait_state(store, tid, DONE)
+            assert await runner.followup(tid, "now do more") is True
+            await _wait_state(store, tid, DONE)
+            events = await store.get_events(tid)
+            # the thread ran twice → two terminal completes in the transcript
+            assert sum(1 for e in events if e.get("type") == "complete") == 2
+        finally:
+            await runner.shutdown()
+
+    async def test_followup_rejected_on_unknown(self):
+        store = InMemoryTaskStore()
+        runner = TaskRunner(SessionAdapter(graph=MockGraph([[]])), store)
+        assert await runner.followup("nope", "hi") is False
+
+
+def _task_id_from(out: str) -> str:
+    return out.split("task_id:")[1].split()[0].strip().rstrip(".")
+
+
+class TestDelegationTools:
+    async def test_start_check_list(self):
+        adapter = SessionAdapter(graph=MockGraph([[SIMPLE_AI_MESSAGE]]), stream_mode="updates")
+        store = InMemoryTaskStore()
+        runner = TaskRunner(adapter, store, concurrency=1, poll_interval=0.05)
+        await runner.start()
+        set_runner(runner)
+        try:
+            out = await start_async_task.ainvoke({"title": "research", "prompt": "go research"})
+            assert "task_id:" in out
+            tid = _task_id_from(out)
+            await _wait_state(store, tid, DONE)
+            assert "done" in (await check_async_task.ainvoke({"task_id": tid})).lower()
+            assert tid in await list_async_tasks.ainvoke({})
+        finally:
+            set_runner(None)
+            await runner.shutdown()
+
+    async def test_parent_id_from_context(self):
+        # The runner sets current_task_id while an agent runs; a tool the agent
+        # calls must stamp the spawned task's parent_id from it.
+        store = InMemoryTaskStore()
+        runner = TaskRunner(SessionAdapter(graph=MockGraph([[SIMPLE_AI_MESSAGE]])), store)  # not started
+        set_runner(runner)
+        try:
+            token = current_task_id.set("parent-123")
+            try:
+                out = await start_async_task.ainvoke({"title": "child", "prompt": "p"})
+            finally:
+                current_task_id.reset(token)
+            child = await store.get(_task_id_from(out))
+            assert child["parent_id"] == "parent-123"
+        finally:
+            set_runner(None)
+
+    async def test_cancel_tool(self):
+        store = InMemoryTaskStore()
+        runner = TaskRunner(SessionAdapter(graph=MockGraph([[SIMPLE_AI_MESSAGE]])), store)  # not started
+        set_runner(runner)
+        try:
+            tid = await runner.enqueue(title="t", prompt="p")
+            assert "Cancelled" in await cancel_async_task.ainvoke({"task_id": tid})
+            assert (await store.get(tid))["state"] == CANCELLED
+        finally:
+            set_runner(None)
+
+    async def test_tools_unavailable_without_runner(self):
+        set_runner(None)
+        assert "unavailable" in (
+            await start_async_task.ainvoke({"title": "x", "prompt": "p"})
+        ).lower()
+        assert "unavailable" in (await list_async_tasks.ainvoke({})).lower()

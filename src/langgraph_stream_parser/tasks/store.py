@@ -85,6 +85,15 @@ class TaskStore(Protocol):
         recover from a crash). Returns the number requeued."""
         ...
 
+    async def append_events(self, task_id: str, events: list[dict[str, Any]]) -> None:
+        """Append serialized stream events to a task's transcript (the live
+        stream the runner produces). Enables a detail/replay view per task."""
+        ...
+
+    async def get_events(self, task_id: str) -> list[dict[str, Any]]:
+        """Return a task's full event transcript in order (empty if none)."""
+        ...
+
 
 class InMemoryTaskStore:
     """Dependency-free reference store. Not durable across process restarts.
@@ -95,6 +104,7 @@ class InMemoryTaskStore:
 
     def __init__(self) -> None:
         self._tasks: dict[str, Task] = {}
+        self._events: dict[str, list[dict[str, Any]]] = {}
         self._lock = asyncio.Lock()
 
     async def setup(self) -> None:
@@ -149,3 +159,9 @@ class InMemoryTaskStore:
                 task["started_at"] = None
                 n += 1
         return n
+
+    async def append_events(self, task_id: str, events: list[dict[str, Any]]) -> None:
+        self._events.setdefault(task_id, []).extend(events)
+
+    async def get_events(self, task_id: str) -> list[dict[str, Any]]:
+        return list(self._events.get(task_id, []))

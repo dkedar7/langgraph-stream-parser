@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.6.0] - 2026-06-14
+
+Make delegated tasks **interactive** — a per-task event transcript, agent
+self-delegation tools, and talk-back. Builds on the 0.5.0 task engine.
+
+### Added
+- **Event transcript per task.** `TaskRunner` now *streams* each run's events to
+  the store as they arrive (instead of draining at the end), via two new
+  `TaskStore` methods — `append_events` / `get_events`. This is what makes a
+  per-task detail/replay view (and live-tailing) possible. `InMemoryTaskStore`
+  implements both.
+- **`TASK_TOOLS`** (`langgraph_stream_parser.tasks.tools`) — five agent-facing
+  delegation tools (`start_async_task`, `check_async_task`, `list_async_tasks`,
+  `update_async_task`, `cancel_async_task`) so an agent can spawn async copies of
+  itself against the local runner (no remote server). Mirrors the deepagents
+  async-subagent contract.
+- **`current_task_id`** context var — set while a task's agent runs, so a
+  sub-task it spawns is automatically linked to it (`parent_id`), forming a tree.
+- **`TaskRunner.followup(task_id, message)`** — send a follow-up to a finished
+  task; continues its thread (it remembers prior work) and re-runs in the
+  background. `TaskRunner.store` property for read access from tools.
+
+### Notes
+- Additive; the 0.5.0 API is unchanged. The streaming rewrite preserves the
+  same terminal-outcome → board-state mapping and cancel/shutdown semantics
+  (regression-tested).
+
 ## [0.5.0] - 2026-06-14
 
 An **async task-delegation engine** — the reusable core behind a "delegate a

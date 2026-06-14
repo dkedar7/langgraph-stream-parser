@@ -63,8 +63,10 @@ from .tasks import (
     InMemoryTaskStore,
     Task,
     TaskState,
+    TASK_TOOLS,
     set_runner,
     get_runner,
+    current_task_id,
     outcome_to_state,
 )
 from .compat import (
@@ -74,7 +76,7 @@ from .compat import (
     aresume_graph_from_interrupt,
 )
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 __all__ = [
     # Main parser
@@ -114,8 +116,10 @@ __all__ = [
     "InMemoryTaskStore",
     "Task",
     "TaskState",
+    "TASK_TOOLS",
     "set_runner",
     "get_runner",
+    "current_task_id",
     "outcome_to_state",
     # Serialization
     "event_to_dict",

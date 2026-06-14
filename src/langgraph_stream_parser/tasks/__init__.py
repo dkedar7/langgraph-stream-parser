@@ -20,7 +20,8 @@ Example:
 """
 from __future__ import annotations
 
-from .runner import TaskRunner, get_runner, set_runner
+from .runner import TaskRunner, current_task_id, get_runner, set_runner
+from .tools import TASK_TOOLS
 from .state import (
     CANCELLED,
     DONE,
@@ -38,6 +39,8 @@ __all__ = [
     "TaskRunner",
     "set_runner",
     "get_runner",
+    "current_task_id",
+    "TASK_TOOLS",
     "TaskStore",
     "InMemoryTaskStore",
     "Task",
