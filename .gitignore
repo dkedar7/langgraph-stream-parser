@@ -206,3 +206,4 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 .jupyter_ystore.db
+REVAMP_PLAN.md
