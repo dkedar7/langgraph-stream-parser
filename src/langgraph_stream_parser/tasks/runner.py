@@ -21,6 +21,7 @@ atomic claim is only atomic within one process — run one server worker.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import uuid
 from typing import Any, Optional
@@ -38,6 +39,18 @@ from .state import (
 from .store import Task, TaskStore, now_iso
 
 logger = logging.getLogger(__name__)
+
+#: Set to the running task's id while its agent executes, so delegation tools
+#: called by that agent can record the spawned sub-task's ``parent_id``.
+#: ``asyncio.create_task`` copies the context, so the value propagates into the
+#: agent's run task and the tools it invokes.
+current_task_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "langstage_current_task_id", default=None
+)
+
+#: Event ``type`` values that end a run's stream (the parser emits exactly one
+#: per turn; an interrupt is followed by a trailing ``complete``).
+_TERMINAL_EVENT_TYPES = frozenset({"complete", "error", "cancelled"})
 
 
 class TaskRunner:
@@ -63,6 +76,11 @@ class TaskRunner:
         self._side_tasks: set[asyncio.Task] = set()  # resume runs, etc.
         self._wake = asyncio.Event()
         self._started = False
+
+    @property
+    def store(self) -> TaskStore:
+        """The task store backing this runner (for read access from tools)."""
+        return self._store
 
     # ── lifecycle ────────────────────────────────────────────────────
     async def start(self) -> None:
@@ -158,6 +176,36 @@ class TaskRunner:
         t.add_done_callback(self._side_tasks.discard)
         return True
 
+    async def followup(self, task_id: str, message: str) -> bool:
+        """Send a follow-up message to a finished task's thread (talk-back).
+
+        Continues the conversation on the same thread (the checkpointer keeps
+        history), runs in the background, and flips the task to ``ongoing`` →
+        ``done`` with the new reply. For a ``review_needed`` task use
+        :meth:`resume` instead. Non-blocking.
+        """
+        if not message or not message.strip():
+            return False
+        task = await self._store.get(task_id)
+        if task is None or task.get("state") not in {DONE, FAILED, CANCELLED}:
+            return False
+        await self._store.update(
+            task_id, state=ONGOING, finished_at=None, error=None, started_at=now_iso()
+        )
+        t = asyncio.create_task(self._followup_run(task, message.strip()))
+        self._side_tasks.add(t)
+        t.add_done_callback(self._side_tasks.discard)
+        return True
+
+    async def _followup_run(self, task: Task, message: str) -> None:
+        task_id = task["task_id"]
+        token = current_task_id.set(task_id)
+        try:
+            session = self._adapter.submit_message(task["thread_id"], message)
+        finally:
+            current_task_id.reset(token)
+        await self._await_run(task_id, session)
+
     async def retry(self, task_id: str) -> bool:
         """Re-queue a ``failed`` / ``cancelled`` task (same thread → resumes
         from its last checkpoint where a durable saver is configured)."""
@@ -195,25 +243,46 @@ class TaskRunner:
 
     async def _run_one(self, task: Task) -> None:
         task_id = task["task_id"]
-        session = self._adapter.submit_message(
-            task["thread_id"],
-            task["prompt"],
-            context_parts=[f"[{self._context_label}: {task.get('title', task_id)}]"],
-        )
+        # Tag the context so any sub-task the agent spawns records this as parent.
+        token = current_task_id.set(task_id)
+        try:
+            session = self._adapter.submit_message(
+                task["thread_id"],
+                task["prompt"],
+                context_parts=[f"[{self._context_label}: {task.get('title', task_id)}]"],
+            )
+        finally:
+            current_task_id.reset(token)
         await self._await_run(task_id, session)
 
     async def _resume_run(
         self, task: Task, decisions: list[dict[str, Any]]
     ) -> None:
         task_id = task["task_id"]
-        session = self._adapter.submit_decisions(task["thread_id"], decisions)
+        token = current_task_id.set(task_id)
+        try:
+            session = self._adapter.submit_decisions(task["thread_id"], decisions)
+        finally:
+            current_task_id.reset(token)
         await self._await_run(task_id, session)
 
     async def _await_run(self, task_id: str, session: Any) -> None:
-        """Await a session's in-flight turn and record the outcome."""
+        """Stream the run's events to the store as they arrive, then record the
+        terminal outcome. Streaming (vs draining at the end) is what makes the
+        per-task detail/replay view possible — including live-tailing."""
+        content_parts: list[str] = []
+        q = getattr(session, "event_queue", None)
+        run_task = getattr(session, "current_task", None)
         try:
-            run_task = getattr(session, "current_task", None)
-            if run_task is not None:
+            if q is not None:
+                while True:
+                    event = await q.get()
+                    await self._store.append_events(task_id, [event])
+                    if event.get("type") == "content" and event.get("role", "assistant") == "assistant":
+                        content_parts.append(event.get("content", ""))
+                    if event.get("type") in _TERMINAL_EVENT_TYPES:
+                        break
+            if run_task is not None and not run_task.done():
                 await run_task
         except asyncio.CancelledError:
             cur = asyncio.current_task()
@@ -221,18 +290,30 @@ class TaskRunner:
                 # This worker is itself being cancelled (shutdown) → propagate
                 # so it can exit; leave the task ``ongoing`` for restart recovery.
                 raise
-            # Otherwise the *run* task was cancelled via ``cancel()`` — its
-            # state is already set; just drain and stop.
-            self._drain(session)
+            # Otherwise the *run* task was cancelled via ``cancel()`` — its state
+            # is already set; persist any stragglers and stop.
+            await self._flush_remaining(task_id, q)
             return
         except Exception:  # pragma: no cover - _produce captures its own errors
             logger.exception("task %s run raised", task_id)
 
-        events = self._drain(session)
-        await self._record_outcome(task_id, session, events)
+        result_text = "".join(content_parts).strip() or None
+        await self._record_outcome(task_id, session, result_text)
+
+    async def _flush_remaining(self, task_id: str, q: Any) -> None:
+        if q is None:
+            return
+        leftover: list[dict[str, Any]] = []
+        while not q.empty():
+            try:
+                leftover.append(q.get_nowait())
+            except asyncio.QueueEmpty:  # pragma: no cover
+                break
+        if leftover:
+            await self._store.append_events(task_id, leftover)
 
     async def _record_outcome(
-        self, task_id: str, session: Any, events: list[dict[str, Any]]
+        self, task_id: str, session: Any, result_text: Optional[str]
     ) -> None:
         outcome = getattr(session, "outcome", None)
         state = outcome_to_state(outcome)
@@ -240,37 +321,12 @@ class TaskRunner:
         if state in TERMINAL_STATES:
             fields["finished_at"] = now_iso()
         if state == DONE:
-            fields["result"] = self._result_text(events)
+            fields["result"] = result_text
         elif state == REVIEW_NEEDED:
             fields["interrupt"] = getattr(session, "interrupt", None)
         elif state == FAILED:
             fields["error"] = getattr(session, "error", None) or "Task run failed."
         await self._store.update(task_id, **fields)
-
-    @staticmethod
-    def _drain(session: Any) -> list[dict[str, Any]]:
-        """Drain a headless session's event queue (no SSE consumer)."""
-        events: list[dict[str, Any]] = []
-        q = getattr(session, "event_queue", None)
-        if q is None:
-            return events
-        while not q.empty():
-            try:
-                events.append(q.get_nowait())
-            except asyncio.QueueEmpty:  # pragma: no cover
-                break
-        return events
-
-    @staticmethod
-    def _result_text(events: list[dict[str, Any]]) -> Optional[str]:
-        """Reconstruct the assistant's final text from streamed content events."""
-        parts = [
-            e.get("content", "")
-            for e in events
-            if e.get("type") == "content" and e.get("role", "assistant") == "assistant"
-        ]
-        text = "".join(parts).strip()
-        return text or None
 
 
 # ── process-global singleton (so agent tools can reach the runner) ──
