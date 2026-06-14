@@ -29,6 +29,23 @@ export LANGSTAGE_AGENT_SPEC=langgraph_stream_parser.demo.stub:graph  # or each C
 
 And the resolved configuration (each value, its source, and the env var / `langstage.toml` key that sets it) is printable everywhere: `python -m langgraph_stream_parser.host`, or each CLI's `--show-config`.
 
+## Serve any agent over AG-UI
+
+Any LangGraph agent can be served over the **[AG-UI protocol](https://github.com/ag-ui-protocol/ag-ui)** — the event-based wire format for streaming rich agent interactions (text, tool calls, reasoning, state, and human-in-the-loop interrupts) to frontends. The host layer resolves *which* agent; the official, MIT-licensed `ag-ui-langgraph` adapter owns the wire:
+
+```bash
+pip install "langgraph-stream-parser[agui]"
+langstage-agui --agent my_agent.py:graph     # serve over AG-UI at http://127.0.0.1:8000
+langstage-agui --demo                          # keyless echo agent, no API key
+```
+
+```python
+from langgraph_stream_parser.agui import build_app
+app = build_app(my_compiled_graph)   # an ASGI app; run with uvicorn
+```
+
+This is the family's blessed path to the broad AG-UI frontend ecosystem (CopilotKit, React/Vue/Angular components, and any AG-UI client). See [`docs/adr/0001-adopt-ag-ui-for-the-wire.md`](docs/adr/0001-adopt-ag-ui-for-the-wire.md) for the rationale.
+
 ## Installation
 
 ```bash

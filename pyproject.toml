@@ -1,10 +1,10 @@
 [project]
 name = "langgraph-stream-parser"
-version = "0.3.0"
-description = "Universal parser for LangGraph streaming outputs"
+version = "0.4.0"
+description = "Universal parser + host layer for LangGraph agents — typed stream events, agent-spec loading, layered config, and an AG-UI bridge"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     {name = "Kedar Dabhadkar"}
 ]
@@ -21,9 +21,9 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
@@ -41,6 +41,12 @@ fastapi = [
 demo = [
     "deepagents>=0.3",
 ]
+agui = [
+    # Adopt the official, MIT, standalone LangGraph->AG-UI adapter for the wire.
+    # [fastapi] pulls the ASGI endpoint helper; uvicorn serves it.
+    "ag-ui-langgraph[fastapi]>=0.0.41",
+    "uvicorn>=0.30",
+]
 real = [
     "langchain-openai>=0.2",
     "langgraph>=1.1.0",
@@ -54,7 +60,12 @@ dev = [
     "rich>=13.0",
     "fastapi>=0.100",
     "httpx>=0.25",
+    "ag-ui-langgraph[fastapi]>=0.0.41",
+    "uvicorn>=0.30",
 ]
+
+[project.scripts]
+langstage-agui = "langgraph_stream_parser.agui.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/dkedar7/langgraph-stream-parser"
