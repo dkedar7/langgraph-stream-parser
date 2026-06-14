@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0] - 2026-06-14
+
+Adopt **AG-UI** for the wire (see `docs/adr/0001-adopt-ag-ui-for-the-wire.md`).
+
+### Added
+- **`langgraph_stream_parser.agui`** — a bridge that serves any LangGraph agent over the [AG-UI protocol](https://github.com/ag-ui-protocol/ag-ui) using the official MIT `ag-ui-langgraph` adapter. `build_agent()`, `add_agui_endpoint()`, `build_app()`, `serve()`.
+- **`langstage-agui` console script** (and `python -m langgraph_stream_parser.agui`) — `langstage-agui --agent <spec>` / `--demo` serves any agent spec over AG-UI. The agent spec resolves through the shared host config chain.
+- **`[agui]` extra** — `ag-ui-langgraph[fastapi]` + `uvicorn`.
+
+### Notes
+- This is additive. The typed-event layer (`StreamParser`, `event_to_dict`, the extractors) is unchanged and still backs the existing surfaces; per the ADR it becomes legacy/optional and surfaces migrate to AG-UI incrementally. The host layer (`HostConfig`, `load_agent_spec`, demo) is the durable core.
+
 ## [0.3.0] - 2026-06-10
 
 The host family is renamed to **LangStage** ("every stage for your LangGraph agent"); this package keeps its name as the shared core.
