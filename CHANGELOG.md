@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.1] - 2026-06-14
+
+AG-UI bridge robustness — an edge-case audit (`tests/test_agui_matrix.py`, run against purpose-built tool-calling / interrupting / erroring / checkpointer-less agents) surfaced three real issues, now fixed:
+
+### Fixed
+- **Graphs compiled without a checkpointer no longer hard-crash.** The AG-UI adapter calls `graph.aget_state()`, which raises `No checkpointer set` — common for plain user graphs. `build_agent()` now auto-attaches an in-memory checkpointer when the graph lacks one (AG-UI needs threaded state for interrupts/resume regardless).
+- **Agent exceptions mid-run now emit a terminal `RUN_ERROR`** instead of silently killing the stream / unhandled 500. The endpoint is now a resilient wrapper around the agent run.
+
+### Verified (was previously only claimed)
+- Tool calls map to `TOOL_CALL_START`/`ARGS`/`END` + `TOOL_CALL_RESULT`.
+- Interrupts surface as a `CUSTOM` `on_interrupt` event; resume via `forwardedProps.command.resume` continues the run (HITL round-trip).
+- Multi-turn thread state persists; concurrent requests are isolated (per-request agent clone). Note: AG-UI clients must use **unique message ids** per turn — the adapter dedupes by id.
+
 ## [0.4.0] - 2026-06-14
 
 Adopt **AG-UI** for the wire (see `docs/adr/0001-adopt-ag-ui-for-the-wire.md`).
