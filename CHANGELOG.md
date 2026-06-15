@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.1] - 2026-06-15
+
+### Changed
+- Sharpened the `start_async_task` tool description so models reliably prefer
+  async delegation for long-running / parallelizable / background work (instead
+  of doing it inline or via a blocking sub-agent). Docstring-only; no behavior
+  change.
+
 ## [0.6.0] - 2026-06-14
 
 Make delegated tasks **interactive** — a per-task event transcript, agent

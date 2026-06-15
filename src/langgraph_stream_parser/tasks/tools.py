@@ -21,15 +21,23 @@ _UNAVAILABLE = "Async task delegation is unavailable in this context."
 
 @langchain_tool
 async def start_async_task(title: str, prompt: str) -> str:
-    """Delegate a task to a background copy of yourself.
+    """Delegate a self-contained piece of work to a background copy of yourself.
 
-    Returns a task_id immediately; the task runs in the background while you
-    keep working. Do NOT wait or poll — report the task_id to the user and move
-    on. Use this for long or parallelizable work.
+    PREFER THIS over doing the work inline or spawning a blocking sub-agent
+    whenever a task is long-running, can run in parallel with other work, or can
+    simply proceed in the background while you keep talking to the user. It
+    returns a task_id immediately and the work continues asynchronously — you are
+    NOT blocked, so do NOT wait or poll. Report the task_id and carry on.
+
+    Ideal for: research, multi-step builds or analyses, batch jobs, fan-out
+    (launch several at once), or anything the user would otherwise have to wait
+    on. Each task runs as its own copy of you with the same tools; check on it
+    later with check_async_task only when the user asks.
 
     Args:
-        title: A short human-readable name for the task.
-        prompt: The full instruction for the background agent to carry out.
+        title: A short human-readable name for the task (shown on the board).
+        prompt: The full, self-contained instruction for the background agent —
+            it does not see this conversation, so include everything it needs.
     """
     runner = get_runner()
     if runner is None:
