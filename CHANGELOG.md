@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- `__version__` is now derived from the installed distribution metadata
+  (`importlib.metadata.version`) instead of a hard-coded constant, so it can
+  never drift out of sync with `pyproject.toml`. No behavior change — it still
+  reports the installed version.
+
 ## [0.6.3] - 2026-06-18
 
 ### Fixed
