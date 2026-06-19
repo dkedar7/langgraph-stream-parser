@@ -29,6 +29,8 @@ Legacy Dict-Based API:
             # Handle interrupt
             ...
 """
+from importlib.metadata import PackageNotFoundError, version
+
 from .parser import StreamParser
 from .events import (
     ContentEvent,
@@ -76,7 +78,12 @@ from .compat import (
     aresume_graph_from_interrupt,
 )
 
-__version__ = "0.6.3"
+# Single source of truth is the installed distribution metadata (driven by
+# pyproject's version), so a hard-coded constant can never drift out of sync.
+try:
+    __version__ = version("langgraph-stream-parser")
+except PackageNotFoundError:  # pragma: no cover - editable/source checkout
+    __version__ = "0.0.0+local"
 
 __all__ = [
     # Main parser
