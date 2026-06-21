@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.6.7] - 2026-06-21
+
+### Fixed
+- **`tool_end` reported `name="unknown"`** when a `ToolMessage` lacked a `name`,
+  even though the correlated `tool_start` (same id) carried it. The end event now
+  backfills the name from the tracked start event. (Found via langstage-vscode.)
+- **`langstage-agui --demo` without the `[agui]` extra** printed a success-looking
+  `Serving … at http://…` banner and *then* a traceback. It now pre-flights the
+  AG-UI deps and exits 2 with a clean install hint (no fake banner). New
+  `agui.ensure_available()`.
+- **`python -m langgraph_stream_parser.host` ignored all args** — `--help` was a
+  silent no-op. Added a tiny argparse so `-h/--help` works and unknown flags error.
+
+### Added
+- A lightweight **`[stub]` extra** (`langgraph` only) for the keyless stub agent /
+  `--demo` path, so trying the echo demo no longer drags in the full `[demo]` /
+  deepagents ML stack (~50 pkgs). README + `demo/__init__` docstring now point the
+  keyless path at `[stub]`.
+
 ## [0.6.6] - 2026-06-21
 
 ### Fixed

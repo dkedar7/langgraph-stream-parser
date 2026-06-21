@@ -29,7 +29,14 @@ Quick start::
 # RunAgentInput as the request body; PEP 604 unions work natively on >=3.11.
 from typing import Any
 
-__all__ = ["build_agent", "add_agui_endpoint", "build_app", "serve", "DEFAULT_AGENT_NAME"]
+__all__ = [
+    "build_agent",
+    "add_agui_endpoint",
+    "build_app",
+    "serve",
+    "ensure_available",
+    "DEFAULT_AGENT_NAME",
+]
 
 DEFAULT_AGENT_NAME = "LangStage Agent"
 
@@ -37,6 +44,20 @@ _IMPORT_HINT = (
     "AG-UI support needs the 'agui' extra: "
     'pip install "langgraph-stream-parser[agui]"'
 )
+
+
+def ensure_available() -> None:
+    """Raise the agui-extra ``RuntimeError`` if the AG-UI server deps are missing.
+
+    Lets a caller fail fast with the clean install hint *before* any user-facing
+    output (e.g. a "Serving … at <url>" banner), instead of mid-serve.
+    """
+    try:
+        import ag_ui_langgraph  # noqa: F401
+        import fastapi  # noqa: F401
+        import uvicorn  # noqa: F401
+    except ImportError as e:  # pragma: no cover - only without the [agui] extra
+        raise RuntimeError(_IMPORT_HINT) from e
 
 
 def _is_langgraph_agent(obj: Any) -> bool:

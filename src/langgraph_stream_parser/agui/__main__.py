@@ -97,7 +97,16 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    from . import DEFAULT_AGENT_NAME, serve
+    from . import DEFAULT_AGENT_NAME, ensure_available, serve
+
+    # Fail fast on a missing [agui] extra with a clean hint to stderr — before the
+    # "Serving … at <url>" banner, so the user doesn't see a fake success line
+    # followed by a traceback (gh #-dogfood).
+    try:
+        ensure_available()
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
 
     name = args.name or ("Demo Agent" if args.demo else DEFAULT_AGENT_NAME)
     # cfg.host/cfg.port are the resolved values --show-config prints, so the

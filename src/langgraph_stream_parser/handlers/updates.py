@@ -430,9 +430,13 @@ class UpdatesHandler:
                     datetime.now() - start_event.timestamp
                 ).total_seconds() * 1000
 
+            # A ToolMessage often lacks ``name``; backfill from the correlated
+            # start event (same tool_call_id) so tool_end carries the real tool
+            # name for clients that key off name rather than id (gh #-dogfood).
+            end_name = tool_name or (start_event.name if start_event else None) or "unknown"
             yield ToolCallEndEvent(
                 id=tool_call_id,
-                name=tool_name or "unknown",
+                name=end_name,
                 result=content,
                 status="error" if is_error else "success",
                 error_message=error_message,

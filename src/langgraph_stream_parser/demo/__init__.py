@@ -12,8 +12,9 @@ Requires the optional ``deepagents`` dependency:
 
 This package also ships the keyless **stub agent** behind every surface's
 ``--demo`` mode (:func:`create_stub_agent` / spec
-``langgraph_stream_parser.demo.stub:graph``) — that one needs no extra and no
-API key.
+``langgraph_stream_parser.demo.stub:graph``) — that one needs no API key and only
+``langgraph`` (installed by any host surface, or via the lightweight ``[stub]``
+extra), not the full ``[demo]``/deepagents stack.
 """
 from .agent import create_default_agent
 from .stub import create_stub_agent
