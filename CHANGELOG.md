@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.6] - 2026-06-21
+
+### Fixed
+- **Dict-form messages rendered nothing** — breaking the "runs any CompiledGraph"
+  promise. LangGraph's `add_messages` reducer accepts dict messages
+  (`{"role": "assistant", "content": ...}` or `{"type": "ai", ...}`), but the
+  updates handler dispatched on the message's class name (`"dict"`), which matched
+  no branch, so a node returning a dict message produced no `ContentEvent`. The
+  handler now coerces dict messages to LangChain Message objects
+  (`convert_to_messages`) before dispatch; existing Message objects pass through
+  unchanged. Fixes blank output for dict-returning agents in langstage-cli /
+  langstage (web) / langstage-vscode. (gh #-dogfood)
+
 ## [0.6.5] - 2026-06-20
 
 ### Fixed

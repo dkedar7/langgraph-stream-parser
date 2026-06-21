@@ -29,6 +29,26 @@ from ..extractors.messages import (
 )
 
 
+def _coerce_messages(messages: list) -> list:
+    """Convert any dict-form messages in the list to LangChain Message objects.
+
+    LangGraph's ``add_messages`` reducer accepts dict messages
+    (``{"role": "assistant", "content": ...}`` or ``{"type": "ai", ...}``).
+    ``convert_to_messages`` maps each to the right AIMessage/HumanMessage/
+    ToolMessage so the handler's class-name dispatch recognizes it; existing
+    Message objects pass through unchanged. Falls back to the original list if
+    ``langchain_core`` is unavailable or a message can't be converted.
+    """
+    if not any(isinstance(m, dict) for m in messages):
+        return messages
+    try:
+        from langchain_core.messages import convert_to_messages
+
+        return list(convert_to_messages(messages))
+    except Exception:
+        return messages
+
+
 class UpdatesHandler:
     """Handler for stream_mode='updates' chunks.
 
@@ -168,6 +188,13 @@ class UpdatesHandler:
         # Normalize to list
         if not isinstance(messages, list):
             messages = [messages]
+
+        # Coerce dict-form messages ({"role"/"type": ..., "content": ...}) into
+        # LangChain Message objects. LangGraph's add_messages reducer officially
+        # accepts dict messages, so a node returning {"role":"assistant",...}
+        # produced a dict whose class name matched no branch below and rendered
+        # NOTHING — breaking the "any CompiledGraph" promise. (gh #-dogfood)
+        messages = _coerce_messages(messages)
 
         # Process each message in sequence
         for message in messages:
