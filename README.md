@@ -55,10 +55,11 @@ pip install langgraph-stream-parser
 The core depends only on `langchain-core`. The Quick Start below parses *your*
 compiled LangGraph `graph`, so you'll also have `langgraph` (and your agent's
 deps) installed. To try it end to end with **no API key and no agent of your
-own**, install the demo extra for a bundled stub graph:
+own**, install the lightweight `stub` extra (just `langgraph`) for a bundled
+stub graph:
 
 ```bash
-pip install "langgraph-stream-parser[demo]"
+pip install "langgraph-stream-parser[stub]"
 ```
 ```python
 from langgraph_stream_parser.demo import create_stub_agent

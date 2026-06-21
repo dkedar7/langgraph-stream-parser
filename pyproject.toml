@@ -1,6 +1,6 @@
 [project]
 name = "langgraph-stream-parser"
-version = "0.6.6"
+version = "0.6.7"
 description = "Universal parser + host layer for LangGraph agents — typed stream events, agent-spec loading, layered config, an AG-UI bridge, and an async task-delegation engine"
 readme = "README.md"
 license = {text = "MIT"}
@@ -43,6 +43,13 @@ jupyter = [
 ]
 fastapi = [
     "fastapi>=0.100",
+]
+# Minimal extra for the keyless stub agent (create_stub_agent / the --demo path):
+# the stub needs only langgraph + langchain-core, so this avoids dragging in the
+# full deepagents ML stack (anthropic + google-genai + cryptography, ~50 pkgs)
+# just to run an echo demo. `[demo]` (deepagents) is for create_default_agent.
+stub = [
+    "langgraph>=1.1",
 ]
 demo = [
     "deepagents>=0.3",
