@@ -41,8 +41,12 @@ def create_stub_agent(
     Args:
         name: Display name surfaced in host UIs.
         reply_prefix: Prepended to the echoed user message in every reply.
-        checkpointer: LangGraph checkpointer. Defaults to an in-memory saver
-            so multi-turn threads work out of the box.
+        checkpointer: Optional LangGraph checkpointer. Defaults to ``None`` —
+            the graph is compiled **without** a checkpointer so it streams with
+            zero ``config``/``thread_id`` bookkeeping (the documented keyless
+            Quick Start just works). Pass one if you want multi-turn
+            persistence; hosts that need threaded state (e.g. AG-UI) attach one
+            automatically.
 
     Returns:
         A compiled LangGraph graph that replies to each user message with
@@ -56,7 +60,6 @@ def create_stub_agent(
         from langchain_core.language_models import BaseChatModel
         from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
         from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
-        from langgraph.checkpoint.memory import MemorySaver
         from langgraph.graph import END, START, MessagesState, StateGraph
     except ImportError as e:  # pragma: no cover — exercised only without the deps
         raise RuntimeError(
@@ -122,7 +125,12 @@ def create_stub_agent(
     builder.add_edge(START, "respond")
     builder.add_edge("respond", END)
 
-    graph = builder.compile(checkpointer=checkpointer or MemorySaver())
+    # No default checkpointer: a checkpointer requires a ``thread_id`` in the
+    # stream config, and without one LangGraph raises — which the parser turns
+    # into a lone ErrorEvent and a silent, blank reply for anyone running the
+    # documented config-free Quick Start. Hosts that need threaded state (AG-UI)
+    # attach a checkpointer themselves.
+    graph = builder.compile(checkpointer=checkpointer)
     graph.name = name
     return graph
 

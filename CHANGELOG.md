@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.6.8] - 2026-06-22
+
+### Fixed
+- **The keyless Quick Start failed *silently*.** `create_stub_agent()` compiled
+  the echo demo with a default `MemorySaver`, so streaming it the way the README
+  Quick Start shows — with no `config`/`thread_id` — raised a "checkpointer
+  requires thread_id" error that the parser surfaced as a lone `ErrorEvent` and a
+  **blank reply (exit 0)** for anyone copy-pasting the docs. The stub now compiles
+  **without** a checkpointer by default, so the documented config-free path just
+  works; pass `checkpointer=...` (or rely on AG-UI's auto-attach) when you want
+  threaded state. (Found by the dogfood routine.)
+- **A UTF-8 BOM in `langstage.toml` crashed config loading on Windows.** Notepad
+  and PowerShell's `Out-File -Encoding utf8` both write a BOM by default;
+  `tomllib.load()` (binary) rejects it with a cryptic "Invalid statement (at line
+  1, column 1)". Because surfaces resolve config eagerly, this could brick a whole
+  stage at import (notably `langstage-jupyter`). `_read_toml` now decodes with
+  `utf-8-sig`, stripping the BOM. Fixes every stage at once. (Found by the dogfood
+  routine.)
+
+### Docs
+- `python -m langgraph_stream_parser.host --help` no longer prints an em-dash that
+  rendered as mojibake (`�`) on a default Windows (cp1252) console.
+- README: `langstage-agui` serves at `http://localhost:8050` (the host-config
+  default), not the stale `127.0.0.1:8000`.
+
 ## [0.6.7] - 2026-06-21
 
 ### Fixed

@@ -149,6 +149,17 @@ class TestLangstageVocabulary:
         cfg = HostConfig.resolve(env={}, toml_start=tmp_path)
         assert cfg.port == 1234
 
+    def test_toml_with_utf8_bom_is_read(self, isolated_global, tmp_path):
+        # Notepad / PowerShell `Out-File -Encoding utf8` prepend a UTF-8 BOM on
+        # Windows; tomllib.load() (binary) chokes on it. The reader must strip it
+        # rather than crash. (gh #-dogfood: a BOM'd langstage.toml bricked jupyter
+        # at import time.)
+        (tmp_path / "langstage.toml").write_bytes(
+            b"\xef\xbb\xbf" + b"[server]\nport = 8123\n"
+        )
+        cfg = HostConfig.resolve(env={}, toml_start=tmp_path)
+        assert cfg.port == 8123
+
     def test_nearest_toml_wins_across_dirs(self, isolated_global, tmp_path):
         # langstage.toml in the parent must NOT beat deepagents.toml in cwd.
         (tmp_path / "langstage.toml").write_text("[server]\nport = 1000\n")

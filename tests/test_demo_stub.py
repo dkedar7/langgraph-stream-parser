@@ -6,7 +6,7 @@ exercise it end to end through the parser.
 """
 from langgraph_stream_parser import StreamParser, load_agent_spec, prepare_agent_input
 from langgraph_stream_parser.demo import create_stub_agent
-from langgraph_stream_parser.events import CompleteEvent, ContentEvent
+from langgraph_stream_parser.events import CompleteEvent, ContentEvent, ErrorEvent
 
 STREAM_MODE = ["updates", "messages"]
 
@@ -41,8 +41,32 @@ def test_streams_token_by_token():
     assert len(content_events) > 1
 
 
-def test_multi_turn_thread_persists():
+def test_streams_config_free():
+    """The documented keyless Quick Start streams with NO config/thread_id.
+
+    Regression (gh #-dogfood): the stub used to compile with a *default*
+    MemorySaver, so a config-free ``.stream()`` raised a "checkpointer requires
+    thread_id" error — which the parser turned into a lone ErrorEvent and a
+    silent, blank reply for anyone copy-pasting the README Quick Start. The stub
+    now compiles without a checkpointer by default, so it just works.
+    """
     graph = create_stub_agent()
+    parser = StreamParser(stream_mode=STREAM_MODE)
+    events = list(
+        parser.parse(
+            graph.stream(prepare_agent_input(message="no config"), stream_mode=STREAM_MODE)
+        )
+    )
+    assert "(demo agent) You said: no config" in _content(events)
+    assert isinstance(events[-1], CompleteEvent)
+    assert not any(isinstance(e, ErrorEvent) for e in events)
+
+
+def test_multi_turn_thread_persists():
+    # Multi-turn persistence is now opt-in: pass an explicit checkpointer.
+    from langgraph.checkpoint.memory import MemorySaver
+
+    graph = create_stub_agent(checkpointer=MemorySaver())
     _run_turn(graph, "first", thread_id="conv")
     state = graph.get_state({"configurable": {"thread_id": "conv"}})
     _run_turn(graph, "second", thread_id="conv")

@@ -21,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--show-config",
         action="store_true",
-        help="Print the resolved config (the default action — accepted for symmetry with langstage-agui).",
+        help="Print the resolved config (the default action - accepted for symmetry with langstage-agui).",
     )
     parser.parse_args(argv)
     print(HostConfig.resolve().describe())

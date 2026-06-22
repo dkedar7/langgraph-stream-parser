@@ -121,8 +121,12 @@ def _deep_merge(base: dict, overlay: dict) -> dict:
 def _read_toml(path: Path) -> dict:
     if _tomllib is None:  # pragma: no cover
         return {}
-    with path.open("rb") as f:
-        return _tomllib.load(f)
+    # Decode with utf-8-sig so a leading UTF-8 BOM is stripped. Notepad and
+    # PowerShell's `Out-File -Encoding utf8` both write a BOM by default on
+    # Windows, and `tomllib.load()` (binary) chokes on it with a cryptic
+    # "Invalid statement (at line 1, column 1)" — which, because jupyter's
+    # config resolves at import time, bricked the whole extension. (gh #-dogfood)
+    return _tomllib.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def load_toml_config(start: Path | None = None) -> tuple[dict, list[Path]]:
