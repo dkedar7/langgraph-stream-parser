@@ -35,7 +35,7 @@ Any LangGraph agent can be served over the **[AG-UI protocol](https://github.com
 
 ```bash
 pip install "langgraph-stream-parser[agui]"
-langstage-agui --agent my_agent.py:graph     # serve over AG-UI at http://127.0.0.1:8000
+langstage-agui --agent my_agent.py:graph     # serve over AG-UI at http://localhost:8050
 langstage-agui --demo                          # keyless echo agent, no API key
 ```
 

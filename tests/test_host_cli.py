@@ -21,6 +21,14 @@ def test_help_shows_usage_and_exits_zero():
     assert "usage:" in r.stdout.lower()
 
 
+def test_help_is_cp1252_clean():
+    # The --help text must encode on a default Windows console (cp1252) without
+    # mojibake — no em-dashes / smart punctuation. (gh #-dogfood)
+    r = _run("--help")
+    assert r.returncode == 0
+    r.stdout.encode("cp1252")  # raises UnicodeEncodeError if a stray em-dash crept back in
+
+
 def test_unknown_flag_errors():
     r = _run("--bogus")
     assert r.returncode != 0
