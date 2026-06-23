@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.10] - 2026-06-22
+
+### Fixed
+- **The stub agent's missing-deps error over-claimed and gave no remedy.** When
+  `langgraph` isn't installed, `create_stub_agent()` raised "needs langgraph +
+  langchain-core (every deep-agent surface already installs them)" — which is
+  false for a base `langstage-vscode` install, and never told the user how to
+  fix it. The message now names the actual remedy: the lightweight
+  `pip install "langgraph-stream-parser[stub]"` extra (or `pip install langgraph`).
+  (Found by the dogfood routine.)
+- **`LANGSTAGE_SUPPRESS_LEGACY_NOTICE=1` now silences the `DeprecationWarning`
+  too**, not just the stderr notice. Previously a suppressed run could still leak
+  a raw `DeprecationWarning` (e.g. into a VS Code output channel), making the
+  "set … to silence" hint only half-true. Setting the env var now opts out of
+  every legacy-env deprecation signal. (Found by the dogfood routine.)
+
 ## [0.6.9] - 2026-06-22
 
 ### Changed

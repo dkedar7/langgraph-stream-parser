@@ -68,6 +68,13 @@ def _warn_legacy_env(legacy: str, canonical: str) -> None:
     if legacy in _warned_legacy_env:
         return
     _warned_legacy_env.add(legacy)
+    # LANGSTAGE_SUPPRESS_LEGACY_NOTICE silences EVERY legacy-env deprecation
+    # signal — both the Python DeprecationWarning and the stderr notice — so the
+    # "set ... to silence" hint we print is actually honest (a user who sets it
+    # shouldn't still see a stray DeprecationWarning leak through, e.g. into a
+    # VS Code output channel).
+    if _env_bool(os.getenv("LANGSTAGE_SUPPRESS_LEGACY_NOTICE")):
+        return
     warnings.warn(
         f"{legacy} is deprecated; use {canonical}.",
         DeprecationWarning,
@@ -79,19 +86,18 @@ def _warn_legacy_env(legacy: str, canonical: str) -> None:
 def _print_legacy_env_notice(legacy: str, canonical: str) -> None:
     """Print a one-line, user-visible deprecation notice to stderr.
 
-    The ``DeprecationWarning`` above is the correct signal for programmatic /
-    strict consumers, but Python's *default* warning filter silently swallows
-    it — so a real person running any LangStage CLI with a legacy
-    ``DEEPAGENT_*`` env var never sees the nudge. Printing here (once per var,
-    via the ``_warned_legacy_env`` dedupe in the caller) makes the deprecation
-    visible across every surface from the one place they all resolve config —
-    no per-surface code needed. ASCII-only so it can't crash a cp1252 Windows
-    console. Suppressed under pytest (keeps test output clean and can't break
-    other repos' suites) and via ``LANGSTAGE_SUPPRESS_LEGACY_NOTICE``.
+    The ``DeprecationWarning`` raised by the caller is the correct signal for
+    programmatic / strict consumers, but Python's *default* warning filter
+    silently swallows it — so a real person running any LangStage CLI with a
+    legacy ``DEEPAGENT_*`` env var never sees the nudge. Printing here (once per
+    var, via the ``_warned_legacy_env`` dedupe in the caller) makes the
+    deprecation visible across every surface from the one place they all resolve
+    config — no per-surface code needed. ASCII-only so it can't crash a cp1252
+    Windows console. Suppressed under pytest (keeps test output clean and can't
+    break other repos' suites); the ``LANGSTAGE_SUPPRESS_LEGACY_NOTICE`` opt-out
+    is handled by the caller (it gates the warning too).
     """
     if "PYTEST_CURRENT_TEST" in os.environ:
-        return
-    if _env_bool(os.getenv("LANGSTAGE_SUPPRESS_LEGACY_NOTICE")):
         return
     print(
         f"note: {legacy} is deprecated; use {canonical}. "

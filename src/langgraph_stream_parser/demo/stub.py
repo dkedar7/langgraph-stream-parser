@@ -63,8 +63,10 @@ def create_stub_agent(
         from langgraph.graph import END, START, MessagesState, StateGraph
     except ImportError as e:  # pragma: no cover — exercised only without the deps
         raise RuntimeError(
-            "The stub agent needs langgraph + langchain-core "
-            "(every deep-agent surface already installs them): "
+            "The stub agent needs langgraph + langchain-core, which aren't "
+            "installed. Install the lightweight stub extra "
+            '(`pip install "langgraph-stream-parser[stub]"`) — or your stage\'s '
+            "own demo extra, or plain `pip install langgraph`: "
             f"{e}"
         ) from e
 
