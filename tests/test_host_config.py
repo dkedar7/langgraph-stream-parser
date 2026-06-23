@@ -165,13 +165,20 @@ class TestLangstageVocabulary:
         assert "deprecated" not in capsys.readouterr().err
 
     def test_legacy_env_notice_suppressed_by_env(self, isolated_global, tmp_path, monkeypatch, capsys):
+        import warnings
+
         import langgraph_stream_parser.host.config as config_mod
 
         config_mod._warned_legacy_env.discard("DEEPAGENT_HOST")
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
         monkeypatch.setenv("LANGSTAGE_SUPPRESS_LEGACY_NOTICE", "1")
-        HostConfig.resolve(env={"DEEPAGENT_HOST": "0.0.0.0"}, toml_start=tmp_path)
+        # SUPPRESS silences BOTH the stderr notice AND the DeprecationWarning,
+        # so the "set ... to silence" hint is honest (no warning leaks through).
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            HostConfig.resolve(env={"DEEPAGENT_HOST": "0.0.0.0"}, toml_start=tmp_path)
         assert "deprecated" not in capsys.readouterr().err
+        assert not [w for w in caught if issubclass(w.category, DeprecationWarning)]
 
     def test_langstage_toml_preferred_in_same_dir(self, isolated_global, tmp_path):
         (tmp_path / "deepagents.toml").write_text("[server]\nport = 1000\n")
