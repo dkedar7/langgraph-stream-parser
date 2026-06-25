@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.6.11] - 2026-06-25
+
+### Fixed
+- **`CLIAdapter` crashed with `UnicodeEncodeError` on a default Windows (cp1252)
+  console.** It prints `⏺`, the braille spinner, box-drawing, and `✓ ✗ ⚠`
+  without ever reconfiguring stdio, so the first styled line raised before any
+  output appeared (and `use_colors=False` didn't help — that strips ANSI, not
+  the glyphs). `CLIAdapter.run()` now reconfigures stdout/stderr to UTF-8
+  (`errors="replace"`) up front, mirroring the `langstage-cli` entry point. The
+  last surface that wasn't cp1252-safe. (gh #37)
+
+### Added
+- **`HostConfig.describe(omit_keys=[...])`** — hide inherited keys a stage
+  doesn't actually honor, so `--show-config` never advertises an env var (with a
+  confident source attribution) that has zero effect on that surface. Used by
+  the stdio sidecar and the JupyterLab launcher to drop the web-only
+  `host`/`port` rows. (gh: langstage-jupyter #30, langstage-vscode #14)
+
 ## [0.6.10] - 2026-06-22
 
 ### Fixed

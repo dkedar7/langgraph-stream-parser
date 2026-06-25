@@ -90,6 +90,20 @@ class TestIntrospection:
         ).describe()
         assert "env:DEEPAGENT_PORT" in text
 
+    def test_describe_omit_keys_hides_inert_keys(self, isolated_global, tmp_path):
+        # A stdio-only stage hides keys it doesn't honor so --show-config never
+        # advertises an env var with no effect on that surface (gh: jupyter #30,
+        # vscode #14).
+        cfg = HostConfig.resolve(env={}, toml_start=tmp_path)
+        full = cfg.describe()
+        assert "host" in full and "port" in full
+        trimmed = cfg.describe(omit_keys=["host", "port"])
+        assert "\n  host " not in trimmed
+        assert "\n  port " not in trimmed
+        assert "LANGSTAGE_HOST" not in trimmed and "LANGSTAGE_PORT" not in trimmed
+        # keys it DOES honor are still shown
+        assert "agent_spec" in trimmed and "workspace_root" in trimmed
+
 
 class TestSubclass:
     def test_subclass_adds_keys_to_same_chain(self, isolated_global, tmp_path):

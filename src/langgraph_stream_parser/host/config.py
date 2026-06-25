@@ -356,16 +356,24 @@ class HostConfig:
         """Per-field origin from the last ``resolve()`` (field -> source)."""
         return getattr(self, "_sources", {})
 
-    def describe(self) -> str:
+    def describe(self, omit_keys: list[str] | None = None) -> str:
         """Human-readable dump: value, source, and the env var / TOML key.
 
         This is what ``python -m langgraph_stream_parser.host`` prints.
+
+        ``omit_keys`` hides inherited keys a particular stage doesn't actually
+        honor — e.g. a stdio-only sidecar passes ``omit_keys=["host", "port"]``
+        so ``--show-config`` never advertises an env var (with a confident
+        source attribution) that has zero effect on that surface.
         """
+        omit = set(omit_keys or ())
         env_map = type(self)._env_map()
         toml_map = type(self)._toml_map()
         src = self.sources
         lines = ["Resolved config  (value  [source]):", ""]
         for f in fields(self):
+            if f.name in omit:
+                continue
             value = getattr(self, f.name)
             origin = src.get(f.name, "default")
             hints = []

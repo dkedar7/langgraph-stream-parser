@@ -50,6 +50,40 @@ class TestCLIAdapterInit:
         assert adapter._todo_types == {"tasks", "checklist"}
 
 
+class TestCLIAdapterCp1252:
+    """A default Windows console is cp1252; CLIAdapter must not crash on it (gh #37)."""
+
+    def test_run_does_not_crash_under_cp1252(self):
+        import os
+        import subprocess
+        import sys
+
+        # The README CLIAdapter example, verbatim, with the keyless stub.
+        script = (
+            "from langgraph_stream_parser.adapters import CLIAdapter\n"
+            "from langgraph_stream_parser.demo import create_stub_agent\n"
+            "CLIAdapter().run(\n"
+            "    graph=create_stub_agent(),\n"
+            "    input_data={'messages': [('user', 'Hello')]},\n"
+            "    config={'configurable': {'thread_id': 't'}},\n"
+            ")\n"
+        )
+        # PYTHONIOENCODING=cp1252 is the canonical default-Windows-console sim.
+        env = {**os.environ, "PYTHONIOENCODING": "cp1252"}
+        r = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+        )
+        assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+        assert "UnicodeEncodeError" not in r.stderr
+        # ...and it actually rendered the echoed reply, not just survived.
+        assert "You said: Hello" in r.stdout
+
+
 class TestCLIAdapterColorHelper:
     def test_color_enabled(self):
         adapter = CLIAdapter(use_colors=True)
