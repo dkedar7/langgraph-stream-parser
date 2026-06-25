@@ -37,6 +37,27 @@ BRIGHT_YELLOW = "\033[93m"
 SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 
+def _ensure_utf8_stdio() -> None:
+    """Make stdout/stderr able to encode this adapter's glyphs on a non-UTF-8
+    console.
+
+    ``CLIAdapter`` prints ``⏺``, the braille spinner, box-drawing, and
+    ``✓ ✗ ⚠`` — none of which a default Windows (cp1252) console can encode, so
+    the very first styled line raises ``UnicodeEncodeError`` before any output
+    appears. Reconfigure to UTF-8 (with ``errors="replace"`` as a backstop),
+    mirroring what the ``langstage-cli`` entry point already does. Idempotent,
+    best-effort, and a no-op when stdout is already UTF-8.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        enc = (getattr(stream, "encoding", None) or "").lower().replace("-", "")
+        if enc in ("utf8", "utf"):
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except (AttributeError, ValueError):  # pragma: no cover - non-reconfigurable stream
+            pass
+
+
 class Spinner:
     """Terminal spinner with elapsed time display."""
 
@@ -130,6 +151,13 @@ class CLIAdapter(BaseAdapter):
         self._use_colors = use_colors
         self._spinner: Spinner | None = None
         self._active_tools: set[str] = set()
+
+    def run(self, *args: Any, **kwargs: Any) -> None:
+        # Make the terminal able to encode our glyphs before any output — on a
+        # default Windows (cp1252) console this prevents a UnicodeEncodeError on
+        # the very first styled line. (gh #37)
+        _ensure_utf8_stdio()
+        return super().run(*args, **kwargs)
 
     def _c(self, code: str) -> str:
         """Return color code if colors enabled, else empty string."""
