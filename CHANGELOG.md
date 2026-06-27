@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.13] - 2026-06-27
+
+### Fixed
+- **`stream_mode="auto"` silently dropped all content for a pure `messages`-mode
+  stream.** Auto-detect only recognized multi-mode `(mode, data)` tuples and v2
+  parts; a `messages` stream's first chunk is `(message, metadata)`, which fell
+  through to `"updates"` and matched none of its chunks — rendering an empty turn
+  with no error (the explicit `stream_mode="messages"` rendered fine). `_peek_and_detect`
+  / `_apeek_and_detect` now recognize a token-streaming first chunk and return
+  `"messages"`. (Found by the dogfood routine, gh #41.)
+
 ## [0.6.12] - 2026-06-26
 
 ### Fixed
