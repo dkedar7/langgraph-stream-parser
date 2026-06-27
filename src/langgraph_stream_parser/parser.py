@@ -69,6 +69,26 @@ def _is_multi_mode(chunk: Any) -> bool:
     return False
 
 
+def _is_messages_mode_chunk(chunk: Any) -> bool:
+    """Check if a chunk is from a pure ``messages``-mode stream.
+
+    A ``messages`` stream yields ``(message_chunk, metadata)`` — chunk[0] is a
+    LangChain message token (has ``content``/``type``), chunk[1] is a metadata
+    dict. This is distinct from multi-mode ``(mode_str, data)`` (str first, caught
+    by ``_is_multi_mode``) and subgraph single-mode ``(namespace_tuple, data)``
+    (tuple first). Duck-typed so the parser needn't import ``langchain_core``.
+    """
+    if not isinstance(chunk, tuple) or len(chunk) != 2:
+        return False
+    first, second = chunk
+    return (
+        isinstance(second, dict)
+        and not isinstance(first, (str, tuple, dict))
+        and hasattr(first, "content")
+        and hasattr(first, "type")
+    )
+
+
 def _is_subgraph_single_mode(chunk: Any) -> bool:
     """Check if a chunk is from single-mode streaming with subgraphs=True.
 
@@ -613,6 +633,11 @@ class StreamParser:
         if _is_v2_stream_part(first_chunk):
             return chain([first_chunk], stream), "v2"
 
+        # A pure messages-mode stream's first chunk is (message, metadata); without
+        # this branch it fell through to "updates" and rendered nothing. (gh #41)
+        if _is_messages_mode_chunk(first_chunk):
+            return chain([first_chunk], stream), "messages"
+
         return chain([first_chunk], stream), "updates"
 
     async def _apeek_and_detect(
@@ -629,6 +654,11 @@ class StreamParser:
 
         if _is_v2_stream_part(first_chunk):
             return _async_chain(first_chunk, stream), "v2"
+
+        # A pure messages-mode stream's first chunk is (message, metadata); without
+        # this branch it fell through to "updates" and rendered nothing. (gh #41)
+        if _is_messages_mode_chunk(first_chunk):
+            return _async_chain(first_chunk, stream), "messages"
 
         return _async_chain(first_chunk, stream), "updates"
 
