@@ -49,6 +49,28 @@ def _coerce_messages(messages: list) -> list:
         return messages
 
 
+def _seen_message(message: Any, seen: set) -> bool:
+    """Whether ``message`` was already emitted in this values stream.
+
+    ``stream_mode="values"`` yields the *cumulative* full state after every
+    super-step, so each message reappears in every later snapshot. We dedup by
+    message id when present, else by (type, content) so an id-less message in
+    successive snapshots still renders once. Mutates ``seen``; returns True if
+    the message was already recorded.
+    """
+    mid = message.get("id") if isinstance(message, dict) else getattr(message, "id", None)
+    if mid is not None:
+        key: Any = ("id", mid)
+    elif isinstance(message, dict):
+        key = ("anon", message.get("type") or message.get("role"), repr(message.get("content")))
+    else:
+        key = ("anon", get_message_type_name(message), repr(getattr(message, "content", None)))
+    if key in seen:
+        return True
+    seen.add(key)
+    return False
+
+
 class UpdatesHandler:
     """Handler for stream_mode='updates' chunks.
 
@@ -138,6 +160,49 @@ class UpdatesHandler:
         # Process regular node updates
         for node_name, state_data in chunk.items():
             yield from self._process_node_update(node_name, state_data)
+
+    def process_values_snapshot(
+        self, snapshot: Any, seen: set
+    ) -> Iterator[StreamEvent]:
+        """Process a ``stream_mode="values"`` full-state snapshot.
+
+        A values snapshot is the whole accumulated state (e.g.
+        ``{"messages": [...all so far...]}``), not a ``{node: update}`` dict, so
+        it can't go through ``process_chunk``. We pull only the messages not yet
+        seen (``seen`` is caller-owned, one set per stream — values snapshots are
+        cumulative) and route them through the same message extraction as node
+        updates, so content blocks, tool calls, reasoning, and usage all render
+        identically to updates mode. Non-message state keys are ignored here to
+        avoid re-emitting the full state on every snapshot.
+        """
+        if not isinstance(snapshot, dict):
+            return
+        messages = snapshot.get("messages")
+        if not messages:
+            return
+        if not isinstance(messages, list):
+            messages = [messages]
+        fresh = [m for m in messages if not _seen_message(m, seen)]
+        if fresh:
+            yield from self._process_messages("", fresh)
+
+    def mark_values_baseline(self, snapshot: Any, seen: set) -> None:
+        """Record a values snapshot's messages as already-seen, emitting nothing.
+
+        The first ``stream_mode="values"`` chunk is the input/baseline state —
+        the full prior conversation history. Marking it as seen means later
+        snapshots surface only what *this* run produced (matching updates mode),
+        instead of replaying the whole history as content.
+        """
+        if not isinstance(snapshot, dict):
+            return
+        messages = snapshot.get("messages")
+        if not messages:
+            return
+        if not isinstance(messages, list):
+            messages = [messages]
+        for message in messages:
+            _seen_message(message, seen)
 
     def _process_node_update(
         self, node_name: str, state_data: Any
