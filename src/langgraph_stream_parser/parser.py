@@ -89,6 +89,26 @@ def _is_messages_mode_chunk(chunk: Any) -> bool:
     )
 
 
+def _is_values_mode_chunk(chunk: Any) -> bool:
+    """Check if a chunk is a ``stream_mode="values"`` full-state snapshot.
+
+    A values chunk is the whole state dict (e.g. ``{"messages": [...]}``), as
+    opposed to an updates chunk whose top level is ``{node_name: {state...}}``
+    (a node-named key mapping to a dict). We key off a top-level ``messages``
+    *list*: in updates mode ``messages`` only appears nested under a node name,
+    so the top-level ``messages`` would be absent (or, for a node literally
+    named ``messages``, a dict — not a list). This covers the common
+    message-carrying state; a custom state with a differently-named channel
+    isn't auto-detected and should pass ``stream_mode="values"`` explicitly.
+    """
+    return (
+        isinstance(chunk, dict)
+        and not _is_v2_stream_part(chunk)
+        and "__interrupt__" not in chunk
+        and isinstance(chunk.get("messages"), list)
+    )
+
+
 def _is_subgraph_single_mode(chunk: Any) -> bool:
     """Check if a chunk is from single-mode streaming with subgraphs=True.
 
@@ -234,7 +254,7 @@ class StreamParser:
     def _validate_stream_mode(stream_mode: str | list[str]) -> None:
         """Validate the stream_mode parameter."""
         if isinstance(stream_mode, str):
-            valid = _VALID_MODES | {"auto", "v2"}
+            valid = _VALID_MODES | {"auto", "v2", "values"}
             if stream_mode not in valid:
                 raise ValueError(
                     f"Unsupported stream_mode: {stream_mode!r}. "
@@ -306,6 +326,8 @@ class StreamParser:
 
             if effective_mode == "v2":
                 yield from self._parse_v2(stream)
+            elif effective_mode == "values":
+                yield from self._parse_values(stream)
             elif isinstance(effective_mode, list):
                 yield from self._parse_multi_mode(stream)
             elif effective_mode == "custom":
@@ -352,6 +374,9 @@ class StreamParser:
 
             if effective_mode == "v2":
                 async for event in self._aparse_v2(stream):
+                    yield event
+            elif effective_mode == "values":
+                async for event in self._aparse_values(stream):
                     yield event
             elif isinstance(effective_mode, list):
                 async for event in self._aparse_multi_mode(stream):
@@ -402,6 +427,18 @@ class StreamParser:
             if not _is_v2_stream_part(chunk):
                 return []
             return self._parse_v2_chunk(chunk)
+
+        if self._stream_mode == "values":
+            data, namespace = _unwrap_single_chunk(chunk)
+            if not isinstance(data, dict):
+                return []
+            handler = self._create_updates_handler()
+            events: list[StreamEvent] = [ValuesEvent(data=data, namespace=namespace)]
+            # No cross-chunk state in parse_chunk(): dedup within this snapshot only.
+            events.extend(
+                _stamp_namespace(handler.process_values_snapshot(data, set()), namespace)
+            )
+            return events
 
         if isinstance(self._stream_mode, list):
             # Multi-mode: expect (mode_name, data) or (namespace, mode_name, data)
@@ -609,6 +646,53 @@ class StreamParser:
             updates_handler, messages_handler,
         ))
 
+    def _parse_values(self, stream: Iterator[Any]) -> Iterator[StreamEvent]:
+        """Parse a ``stream_mode="values"`` stream.
+
+        Each chunk is the full accumulated state. We emit a ``ValuesEvent`` with
+        the whole snapshot (the documented event, previously unreachable from any
+        real ``graph.stream()`` call) and extract content/tool events from the
+        messages, deduped across the cumulative snapshots so each renders once.
+        """
+        handler = self._create_updates_handler()
+        seen: set = set()
+        first = True
+        for chunk in stream:
+            data, namespace = _unwrap_single_chunk(chunk)
+            if not isinstance(data, dict):
+                continue
+            yield ValuesEvent(data=data, namespace=namespace)
+            if first:
+                # The first snapshot is the input/baseline (full prior history);
+                # record it without emitting so we surface only this run's output.
+                handler.mark_values_baseline(data, seen)
+                first = False
+            else:
+                yield from _stamp_namespace(
+                    handler.process_values_snapshot(data, seen), namespace
+                )
+
+    async def _aparse_values(
+        self, stream: AsyncIterator[Any]
+    ) -> AsyncIterator[StreamEvent]:
+        """Async version of _parse_values."""
+        handler = self._create_updates_handler()
+        seen: set = set()
+        first = True
+        async for chunk in stream:
+            data, namespace = _unwrap_single_chunk(chunk)
+            if not isinstance(data, dict):
+                continue
+            yield ValuesEvent(data=data, namespace=namespace)
+            if first:
+                handler.mark_values_baseline(data, seen)
+                first = False
+                continue
+            for event in _stamp_namespace(
+                handler.process_values_snapshot(data, seen), namespace
+            ):
+                yield event
+
     def _peek_and_detect(
         self, stream: Iterator[Any]
     ) -> tuple[Iterator[Any], str | list[str]]:
@@ -638,6 +722,12 @@ class StreamParser:
         if _is_messages_mode_chunk(first_chunk):
             return chain([first_chunk], stream), "messages"
 
+        # A values-mode stream's first chunk is the full state dict (top-level
+        # 'messages' list); without this it fell through to "updates", which sees
+        # no node-keyed update and renders nothing — a silent empty turn. (gh #43)
+        if _is_values_mode_chunk(first_chunk):
+            return chain([first_chunk], stream), "values"
+
         return chain([first_chunk], stream), "updates"
 
     async def _apeek_and_detect(
@@ -659,6 +749,12 @@ class StreamParser:
         # this branch it fell through to "updates" and rendered nothing. (gh #41)
         if _is_messages_mode_chunk(first_chunk):
             return _async_chain(first_chunk, stream), "messages"
+
+        # A values-mode stream's first chunk is the full state dict (top-level
+        # 'messages' list); without this it fell through to "updates", which sees
+        # no node-keyed update and renders nothing — a silent empty turn. (gh #43)
+        if _is_values_mode_chunk(first_chunk):
+            return _async_chain(first_chunk, stream), "values"
 
         return _async_chain(first_chunk, stream), "updates"
 

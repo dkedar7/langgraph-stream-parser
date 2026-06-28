@@ -88,8 +88,9 @@ class TestStreamModeValidation:
         assert parser._stream_mode == ["updates", "messages"]
 
     def test_invalid_string_raises(self):
+        # "values" is now a supported single mode (gh #43); use a truly invalid one.
         with pytest.raises(ValueError, match="Unsupported stream_mode"):
-            StreamParser(stream_mode="values")
+            StreamParser(stream_mode="bogus")
 
     def test_invalid_list_element_raises(self):
         with pytest.raises(ValueError, match="Unsupported mode in stream_mode list"):

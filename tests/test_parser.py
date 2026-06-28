@@ -331,9 +331,10 @@ class TestStreamParserErrors:
         assert "Stream error" in error_events[0].error
 
     def test_unsupported_stream_mode(self):
-        # Unsupported stream mode raises ValueError at construction time
+        # Unsupported stream mode raises ValueError at construction time.
+        # ("values" is supported now — gh #43 — so use a genuinely invalid mode.)
         with pytest.raises(ValueError, match="Unsupported stream_mode"):
-            StreamParser(stream_mode="values")
+            StreamParser(stream_mode="bogus")
 
 
 class TestStreamParserUsage:

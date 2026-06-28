@@ -110,7 +110,7 @@ for event in parser.parse(graph.stream(input_data, stream_mode="updates")):
 | `StateUpdateEvent` | Non-message state updates (opt-in) |
 | `UsageEvent` | Token usage metadata (input/output/total/cache_read/cache_creation tokens) |
 | `CustomEvent` | Custom data emitted via `get_stream_writer()` |
-| `ValuesEvent` | Full state snapshot from `stream_mode="values"` (v2) |
+| `ValuesEvent` | Full state snapshot from `stream_mode="values"` (one per super-step) |
 | `DebugEvent` | Debug, checkpoint, or task trace from v2 streaming |
 | `CompleteEvent` | Stream finished successfully |
 | `ErrorEvent` | Error during streaming |
@@ -373,7 +373,7 @@ The `display_type` field is consumer-defined — any string the tool and UI agre
 ```python
 parser = StreamParser(
     # Stream format to expect (default: "updates")
-    stream_mode="updates",  # or "messages", "custom", "auto", or a list
+    stream_mode="updates",  # or "messages", "custom", "values", "auto", or a list
 
     # Track tool call lifecycle (start -> end)
     track_tool_lifecycle=True,
