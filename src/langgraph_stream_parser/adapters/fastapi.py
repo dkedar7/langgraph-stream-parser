@@ -29,6 +29,7 @@ from ..events import (
 )
 from ..parser import StreamParser
 from ..resume import create_resume_input, prepare_agent_input
+from .base import graph_stream_mode
 
 
 class FastAPIAdapter:
@@ -268,7 +269,7 @@ class FastAPIAdapter:
                 stream = self._graph.astream(
                     input_data,
                     config=config,
-                    stream_mode=self._stream_mode,
+                    stream_mode=graph_stream_mode(self._stream_mode),
                 )
                 async for event in parser.aparse(stream):
                     yield event

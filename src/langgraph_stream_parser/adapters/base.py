@@ -31,6 +31,27 @@ from ..parser import StreamParser
 from ..resume import create_resume_input
 
 
+def graph_stream_mode(stream_mode: str | list[str]) -> str | list[str]:
+    """Translate a parser-side stream_mode into one ``graph.stream()`` accepts.
+
+    ``"auto"`` and ``"v2"`` are parser-side concepts that LangGraph's
+    ``graph.stream()`` / ``astream()`` do not understand — forwarding them
+    verbatim yields zero chunks and a silent blank turn. For ``"auto"`` we drive
+    the graph with real multi-mode streaming and let the parser auto-detect the
+    shape; ``"v2"`` cannot be produced by ``graph.stream()`` at all, so we fail
+    loudly instead of rendering nothing. Every other mode passes through. (gh #45)
+    """
+    if stream_mode == "auto":
+        return ["updates", "messages"]
+    if stream_mode == "v2":
+        raise ValueError(
+            "stream_mode='v2' is a parser-only format that graph.stream()/astream() "
+            "cannot produce. Use 'updates', 'messages', 'values', 'custom', 'auto', "
+            "or a list of modes."
+        )
+    return stream_mode
+
+
 class ToolStatus(Enum):
     """Status of a tool in its lifecycle."""
     PENDING = "pending"
@@ -213,7 +234,7 @@ class BaseAdapter(ABC):
             stream = graph.stream(
                 current_input,
                 config=config,
-                stream_mode=stream_mode,
+                stream_mode=graph_stream_mode(stream_mode),
                 **stream_kwargs,
             )
 
