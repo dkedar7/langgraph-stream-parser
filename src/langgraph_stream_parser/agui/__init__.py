@@ -36,6 +36,7 @@ __all__ = [
     "serve",
     "ensure_available",
     "iter_event_frames",
+    "iter_chunk_frames",
     "DEFAULT_AGENT_NAME",
 ]
 
@@ -327,3 +328,75 @@ async def iter_event_frames(
             return
 
     yield {"type": "complete"}
+
+
+async def iter_chunk_frames(
+    agent: Any,
+    message: str,
+    thread_id: str,
+    *,
+    resume: Any = None,
+):
+    """Drive an ``ag-ui-langgraph`` agent in-process and yield ``stream_graph_updates``
+    chunk-dict frames (``{"status": "streaming", "chunk"/"tool_calls"/"tool_result": ...}``,
+    ``{"status": "interrupt", ...}``, ``{"status": "complete"}``, ``{"status": "error"}``).
+
+    The chunk-dict counterpart of :func:`iter_event_frames`: the retirement path
+    for surfaces on the ``stream_graph_updates`` wire (the cli and Jupyter render
+    loops). ``resume`` rides ``forwarded_props.command.resume``.
+    """
+    try:
+        from ag_ui.core.types import RunAgentInput, UserMessage
+    except ImportError as e:  # pragma: no cover - only without the extra
+        raise RuntimeError(_IMPORT_HINT) from e
+    import json
+    import uuid
+
+    forwarded_props = {"command": {"resume": resume}} if resume is not None else {}
+    run_input = RunAgentInput(
+        thread_id=thread_id,
+        run_id=str(uuid.uuid4()),
+        state={},
+        messages=[UserMessage(id=str(uuid.uuid4()), role="user", content=message)],
+        tools=[],
+        context=[],
+        forwarded_props=forwarded_props,
+    )
+
+    streamed_text = False
+    tool_buf: dict[str, dict[str, str]] = {}
+
+    async for ev in agent.run(run_input):
+        t = type(ev).__name__
+        if t == "TextMessageContentEvent":
+            streamed_text = True
+            yield {"status": "streaming", "chunk": ev.delta, "node": "agent"}
+        elif t == "ToolCallStartEvent":
+            tool_buf[ev.tool_call_id] = {"name": ev.tool_call_name, "args": ""}
+        elif t == "ToolCallArgsEvent":
+            tool_buf.setdefault(ev.tool_call_id, {"name": "tool", "args": ""})["args"] += ev.delta
+        elif t == "ToolCallEndEvent":
+            tc = tool_buf.pop(ev.tool_call_id, {"name": "tool", "args": ""})
+            try:
+                args = json.loads(tc["args"]) if tc["args"] else {}
+            except json.JSONDecodeError:
+                args = {"_raw": tc["args"]}
+            yield {"status": "streaming", "tool_calls": [{"name": tc["name"], "args": args}]}
+        elif t == "ToolCallResultEvent":
+            yield {"status": "streaming", "tool_result": getattr(ev, "content", "")}
+        elif t == "CustomEvent" and getattr(ev, "name", None) == "on_interrupt":
+            payload = getattr(ev, "value", None)
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except json.JSONDecodeError:
+                    payload = {"action_requests": []}
+            yield {"status": "interrupt", "interrupt": payload or {"action_requests": []}}
+        elif t == "MessagesSnapshotEvent" and not streamed_text:
+            for m in ev.messages:
+                if getattr(m, "role", None) == "assistant" and getattr(m, "content", None):
+                    yield {"status": "streaming", "chunk": m.content, "node": "agent"}
+        elif t == "RunErrorEvent":
+            yield {"status": "error", "error": getattr(ev, "message", "unknown error")}
+
+    yield {"status": "complete"}
