@@ -25,16 +25,22 @@ backwards.)
 ### Fact 2 — hermes is an un-migrated *fifth* surface, entangled with extractors
 
 `langstage-hermes` was never migrated. Its `chat` command renders through
-`StreamParser` + `PrintAdapter`, and — crucially — its entire reflection/skill
-value rides on **three custom extractors** (`langstage_hermes/extractors.py`)
-that implement `extractors.base.ToolExtractor` and emit `ToolExtractedEvent`s
-(e.g. `skill_created`), which the cli renders as typed callouts.
+`StreamParser` + `PrintAdapter`, and its reflection/skill value is *designed* to
+ride on **four custom extractors** (`langstage_hermes/extractors.py`) that
+implement `extractors.base.ToolExtractor` and emit `ToolExtractedEvent`s (e.g.
+`skill_created`), which the cli's `_pretty_extraction` renders as typed callouts.
 
 So ADR 0002's "keep `extractors/`, remove the rest" is **incoherent**: extractors
-are *driven by* `StreamParser` and *emit* an `events.py` type. AG-UI has no
-extractor concept — extractors turn tool *results* into typed domain events, a
-capability the AG-UI vocabulary doesn't carry. You cannot remove `StreamParser` /
-`events.py` while keeping extractors functional for hermes.
+are *driven by* `StreamParser` and *emit* an `events.py` type. You cannot remove
+`StreamParser` / `events.py` while keeping extractors functional for hermes.
+
+**Latent-bug finding (2026-07-01):** those four extractors are **never
+registered** — the only reference outside `extractors.py` is its own docstring,
+and `chat` uses a bare `StreamParser()`. So the skill/memory/compression callouts
+are **dead code that doesn't fire today**. This *de-risks* the migration (there's
+no live behavior to preserve) and means bridging extractors to AG-UI (Stage 1)
+makes them fire for the first time — a fix, not just a port. (Whether to also fix
+the legacy path by registering them is a separate, optional hermes bug-fix.)
 
 ## What "the event layer" actually is (inventory)
 
@@ -56,12 +62,18 @@ input helper `prepare_agent_input` (the AG-UI paths reuse it for context-combini
 Retire the event layer in **five ordered stages**, gated so nothing user-visible
 regresses and no warning fires on a default path.
 
-1. **Solve the extractor → AG-UI story.** Add a way to run tool-result extractors
-   over the AG-UI stream and surface their output — most likely mapping a matched
-   extractor to an AG-UI `CustomEvent` (named, like `on_interrupt`) that
-   `iter_event_frames` / `iter_chunk_frames` translate into a frame hermes'
-   renderer understands. This is the one genuinely novel design piece; everything
-   else is mechanical.
+1. **Solve the extractor → AG-UI story.** — **VALIDATED ✓ (2026-07-01, prototype).**
+   Simpler than first proposed: no AG-UI `CustomEvent` is needed. The extractors
+   run in the **mapping layer** — an `extractors=` param on `iter_event_frames` /
+   `iter_chunk_frames`. On each `ToolCallResultEvent` the bridge looks up the
+   extractor by `tool_name` (already tracked from `ToolCallStart`), calls
+   `extract(content)`, and if non-None emits an `extraction` frame **byte-identical
+   to `event_to_dict(ToolExtractedEvent)`**. The prototype
+   (`deepagent-hermes @ spike/extractor-agui-bridge`) ran hermes' *real*
+   `SkillManageExtractor` over an AG-UI stream and produced
+   `{"type":"extraction","tool_name":"skill_manage","extracted_type":"skill_event",
+   "data":{...,"extracted_subtype":"skill_created"}}` — exactly what hermes'
+   `_pretty_extraction` renderer reads. The extractor protocol is preserved as-is.
 2. **Migrate hermes** (the fifth surface) onto the AG-UI path using (1), reaching
    parity for its reflection/skill callouts. Only after this do all five surfaces
    have an AG-UI path.
@@ -104,9 +116,10 @@ regresses and no warning fires on a default path.
 
 ## Open questions / gates (must clear before Stage 3)
 
-1. **Extractor → AG-UI fidelity.** Can a `CustomEvent`-based extractor bridge
-   reproduce hermes' current callouts (`skill_created`, reflection, display) at
-   parity? Prototype against hermes' three extractors before committing Stage 2.
+1. **Extractor → AG-UI fidelity.** — **RESOLVED ✓ (prototype, see Stage 1).** The
+   `extractors=`-param bridge reproduces the extraction frame at `event_to_dict`
+   parity against hermes' real `SkillManageExtractor`. The remaining extractors are
+   the same protocol; wiring them is mechanical.
 2. **Escape hatch lifetime.** How long do we keep `--no-agui` after a default-flip?
    Proposed: one minor per surface, then remove with the event layer at the major.
 3. **usage events.** ADR 0002 left token-usage parity as a spot-check; confirm the
