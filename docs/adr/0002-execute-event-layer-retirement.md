@@ -1,6 +1,6 @@
 # ADR 0002 — Execute the event-layer retirement; scope the core to the host layer
 
-**Status:** Proposed — 2026-06-30
+**Status:** Accepted — 2026-07-01
 **Decision owner:** Kedar Dabhadkar
 **Supersedes the "staged / later" clauses of:** [ADR 0001](0001-adopt-ag-ui-for-the-wire.md)
 
