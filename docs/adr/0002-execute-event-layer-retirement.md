@@ -144,8 +144,10 @@ migrated one PR at a time, gated on parity.
   `agui.iter_event_frames` (0.6.16); the vscode sidecar still has its own copy.
 
 **Remaining work (post-migration):**
-1. **Dedupe:** point the vscode sidecar at `agui.iter_event_frames` (delete its
-   copy); consider a core `agui` helper for the chunk-dict family (cli + jupyter).
+1. ~~**Dedupe:**~~ **DONE (2026-07-01).** Both mappings live in the core `agui`
+   module — `iter_event_frames` (vscode + web) and `iter_chunk_frames` (cli +
+   jupyter, added 0.6.17). All four surfaces delegate; the local copies are gone.
+   Shipped: cli 0.5.18, jupyter 0.5.14, vscode 0.4.10 (all on core ≥0.6.16/0.6.17).
 2. **Deprecate the event layer (Decision 3):** now that every first-party surface
    has an AG-UI path, mark `StreamParser` / `events.py` / extractors deprecated,
    then remove at the next major — *keeping* `extractors/` (hermes extends it).
