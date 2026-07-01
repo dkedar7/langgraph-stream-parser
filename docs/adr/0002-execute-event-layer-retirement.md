@@ -84,8 +84,10 @@ usable without dragging the web-server stack (see Open questions).
 
 ## Open questions / validation gates (must clear before step 4 lands)
 
-> **Status:** gate (1) cleared 2026-06-30 — cli-first migration is unblocked.
-> gate (2) still open and blocks the HITL surfaces (web, vscode).
+> **Status:** gate (1) cleared 2026-06-30, gate (2) cleared 2026-07-01 — the cli
+> ships text + tools + interrupts on the AG-UI path (langstage-cli 0.5.17). The
+> resume mechanism is proven and generic, so the HITL surfaces (web, vscode) are
+> unblocked. (Usage-event parity is the one remaining spot-check.)
 
 1. **Does `ag-ui-langgraph` expose an in-process event generator without the
    FastAPI/uvicorn stack?** — **RESOLVED ✓ (2026-06-30, probe).**
@@ -109,14 +111,26 @@ usable without dragging the web-server stack (see Open questions).
      the in-process path — light (no `uvicorn`, no C extensions, `pydantic`
      already present via langchain), far from "a web server in the terminal install."
    - *Not covered by this probe:* interrupt/resume + usage parity — that's gate (2).
-2. **Interrupt/resume + usage parity.** ADR 0001 noted interrupt/resume as the
-   capability the OpenAI spec couldn't represent and AG-UI can. Confirm the
-   in-process path preserves it (and token-usage events) at full parity on the
-   HITL surfaces (web board, vscode) before those surfaces migrate.
+2. **Interrupt/resume + usage parity.** — **RESOLVED ✓ (2026-07-01, cli).**
+   A LangGraph `interrupt()` surfaces in-process as `CustomEvent(name="on_interrupt",
+   value=<payload>)` (maps to the display), and **resume** works by delivering the
+   decision as **`forwarded_props.command.resume`** — the field the `ag-ui-langgraph`
+   adapter converts to LangGraph's `Command(resume=...)`. Passing `{"decisions": […]}`
+   there (the exact value the default path builds via `prepare_agent_input(decisions=…)`)
+   drives the graph past the interrupt instead of re-interrupting. Shipped in
+   `langstage-cli` 0.5.17 (`--agui` runs the full display→decide→resume loop,
+   including `--no-interactive` auto-approve) with a resume round-trip test.
+   - *Earlier dead end:* the top-level `RunAgentInput.resume` (typed `ResumeEntry`)
+     did **not** drive a raw `interrupt()` — the adapter reads
+     `forwarded_props.command.resume`, not that field.
+   - *Generic:* the same mechanism unblocks the web board and vscode HITL surfaces.
+   - *Remaining spot-check:* token-**usage** events (not exercised by the cli path).
 
 ## Not doing (now)
 
 - Renaming the core package — bundled with the major that removes `events.py`, decided then.
 - Touching the host layer — it is the keeper; this ADR does not change it.
-- Migrating the HITL surfaces (web, vscode) before gate (2) clears. (gate (1)
-  cleared, so cli-first may proceed.)
+
+**Migration progress:** cli — **done** (0.5.17, text + tools + interrupts). Next by
+the cheapest-first sequence: jupyter, then vscode, then web. Both gates cleared, so
+no surface is gate-blocked; each still migrates one PR at a time, gated on parity.
